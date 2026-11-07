@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // BOTROL accesses Firestore through its authenticated server using the
+    // Firebase Admin SDK. Browser and device clients must use BOTROL APIs.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
