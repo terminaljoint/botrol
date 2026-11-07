@@ -1,24 +1,43 @@
-"""Cloud-side deterministic intent planner for the BOTROL prototype.
+"""Cloud-side intent planner.
 
-This is a rule-based parser, not an LLM. It creates generic, validated actions;
-the ESP32 firmware implements only the small hardware capability interface.
+All task interpretation and application policy live in the cloud. The ESP32
+receives only generic BLE-HID events and contains no app/task vocabulary.
 """
+
 import re
 
 INTENTS = {
     "notepad": ("notepad", ("open notepad", "launch notepad", "start notepad", "notepad")),
-    "calculator": ("calculator", ("open calculator", "launch calculator", "start calculator", "calculator", "calc")),
+    "calculator": ("calc", ("open calculator", "launch calculator", "start calculator", "calculator", "calc")),
 }
+
 
 class PlannerError(Exception):
     pass
+
+
+def _launch_sequence(run_text: str) -> dict:
+    # HID usage 21 = R, modifier bit 8 = left GUI, usage 40 = Enter.
+    return {
+        "command": "hid_sequence",
+        "payload": {
+            "events": [
+                {"type": "key", "code": 21, "modifiers": 8},
+                {"type": "delay", "ms": 900},
+                {"type": "text", "text": run_text},
+                {"type": "delay", "ms": 250},
+                {"type": "key", "code": 40, "modifiers": 0},
+            ]
+        },
+    }
+
 
 def plan_task(transcript: str) -> dict:
     text = " ".join(transcript.lower().strip().split())
     if not text:
         raise PlannerError("Please say or type a task.")
     matches = []
-    for app, phrases in INTENTS.values():
+    for app, (_, phrases) in INTENTS.items():
         positions = []
         for phrase in phrases:
             for match in re.finditer(r"(?<![a-z0-9])" + re.escape(phrase) + r"(?![a-z0-9])", text):
@@ -26,17 +45,13 @@ def plan_task(transcript: str) -> dict:
         if positions:
             matches.append((min(positions), app))
     if not matches:
-        if any(term in text for term in ("ping", "check connection", "check device", "test connection")):
-            return {"summary": "Connection test", "steps": [{"command": "ping", "payload": {}}]}
         raise PlannerError("Unsupported task. Try: 'open Notepad, then open Calculator'.")
     matches.sort(key=lambda item: item[0])
-    # Avoid silently repeating an intent from overlapping synonyms.
     unique = []
     for _, app in matches:
         if app not in unique:
             unique.append(app)
     if len(unique) > 8:
         raise PlannerError("A task can contain at most 8 actions.")
-    steps = [{"command": "hid_action", "payload": {"action": "launch_app", "app": app}}
-             for app in unique]
+    steps = [_launch_sequence(INTENTS[app][0]) for app in unique]
     return {"summary": " then ".join(app.title() for app in unique), "steps": steps}
