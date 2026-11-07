@@ -61,6 +61,7 @@ void emitStatus(const char* state, const char* detail = "") {
   doc["type"] = "status";
   doc["state"] = state;
   doc["detail"] = detail;
+  doc["device_id"] = deviceId;
   doc["wifi"] = WiFi.status() == WL_CONNECTED ? "connected" : "disconnected";
   doc["ssid"] = WiFi.status() == WL_CONNECTED ? WiFi.SSID() : "";
   doc["cloud"] = cloudPaired ? "registered" : "not_registered";
