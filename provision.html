@@ -63,7 +63,8 @@ const firebaseConfig={
 };
 const API="https://botrol-cloud.onrender.com";
 const $=id=>document.getElementById(id);
-let auth=null,user=null,port=null,reader=null,writer=null,connected=false,rxBuffer="",wifiConnected=false,cloudPaired=false;
+const auth=getAuth(initializeApp(firebaseConfig));
+let user=null,port=null,reader=null,writer=null,connected=false,rxBuffer="",wifiConnected=false,cloudPaired=false;
 
 function show(id,message,kind=""){const el=$(id);el.textContent=message;el.className="status"+(kind?" "+kind:"");}
 function updateButtons(){
