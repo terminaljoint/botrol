@@ -1,116 +1,105 @@
 # BOTROL Cloud API
 
-BOTROL is a cloud-coordinated desktop-control prototype. Task interpretation, application selection, action planning and command construction happen in BOTROL Cloud. The ESP32 is a generic BLE-HID event executor.
+BOTROL is a multi-user cloud-coordinated ESP32 desktop-control system. Users authenticate with Google through Firebase Authentication. BOTROL Cloud owns device pairing, authorization, command planning, command queues and execution history. Firestore stores persistent account/device/task state.
 
 ## Architecture
 
-1. The Windows voice agent submits a task transcript to BOTROL Cloud using the admin credential.
-2. The cloud-side planner interprets the task and builds a generic HID event sequence.
-3. The cloud validates the sequence and queues it for the authenticated ESP32.
-4. The ESP32 polls over HTTPS, validates generic event bounds and emits BLE keyboard events.
-5. The ESP32 reports the execution result to the cloud.
+1. A user signs in with Google on the BOTROL setup page.
+2. The setup page requests a five-minute, one-use pairing code from BOTROL Cloud.
+3. The browser sends that code to the ESP32 over USB serial.
+4. The ESP32 exchanges the code with BOTROL Cloud and receives a unique per-device credential.
+5. The ESP32 stores that credential in NVS and uses it for HTTPS polling.
+6. The browser submits tasks using its Firebase ID token. The API verifies the user and checks device ownership.
+7. The cloud planner creates bounded generic HID events and stores them in Firestore.
+8. The ESP32 polls, executes supported events over BLE HID, and reports the result.
 
-## Firmware boundary
+## API
 
-The firmware contains **no task names, application names, task-specific command handlers, intent parsing, or task planning**. It does not know what Notepad or Calculator is. It implements only three generic hardware event types:
+### User routes (Firebase ID token)
 
-- `key`: a USB HID keyboard usage code plus modifier bitmask
-- `text`: printable ASCII text
-- `delay`: a bounded pause in milliseconds
+- `POST /api/v1/pairing-sessions` - create a short-lived one-use pairing code.
+- `GET /api/v1/devices` - list devices owned by the signed-in user.
+- `DELETE /api/v1/devices/{device_id}` - revoke a device credential.
+- `POST /api/v1/tasks/execute` - plan and enqueue a task for an owned device.
+- `GET /api/v1/tasks/{task_id}` - read an owned task's execution status.
 
-Example cloud-to-device payload:
+### Device routes (unique per-device bearer credential)
 
-```json
-{
-  "command": "hid_sequence",
-  "payload": {
-    "events": [
-      {"type": "key", "code": 21, "modifiers": 8},
-      {"type": "delay", "ms": 900},
-      {"type": "text", "text": "notepad"},
-      {"type": "delay", "ms": 250},
-      {"type": "key", "code": 40, "modifiers": 0}
-    ]
-  }
-}
-```
+- `POST /api/v1/devices/pair` - exchange a one-use pairing code for a unique device credential. This is the only device route that does not require a pre-existing device credential.
+- `GET /api/v1/devices/{device_id}/commands/next` - atomically claim the next queued command.
+- `POST /api/v1/devices/{device_id}/commands/{command_id}/result` - report execution result.
 
-The example sequence is planned by the cloud. The ESP32 only interprets generic HID usages and emits keyboard events. HID usage 21 is the R key, modifier bit 8 is GUI, and usage 40 is Enter.
+### Public
 
-## Cloud routes
+- `GET /health` - service and storage status.
 
-- `GET /health`
-- `POST /api/v1/devices/register`
-- `GET /api/v1/devices/{device_id}/commands/next`
-- `POST /api/v1/devices/{device_id}/commands/{command_id}/result`
-- Admin routes under `/api/v1/admin/*`
+## Firebase / Render configuration
 
-## Security controls and limits
+Create a Firebase project and enable **Authentication → Google** and **Cloud Firestore**. Register the BOTROL web app and use its public web configuration in both `dashboard.html` and `provision.html`.
 
-- HTTPS certificate validation in ESP32 firmware using a trusted CA root.
-- Separate admin and device bearer credentials, compared in constant time by the API.
-- Admin-only task submission and status routes.
-- Device-only registration, command polling and result reporting routes.
-- Cloud and device both validate event structure, key usage ranges, modifier masks, printable text and delay limits.
-- Maximum 12 events per sequence; text length is limited to 80 characters; each delay is limited to 2 seconds.
-- UUID command identifiers and queued-to-delivered state transition.
-- Two-minute expiry for commands that remain queued.
-- No firmware-side task-specific command vocabulary.
+Set these environment variables in the Render service:
 
-**Important security boundary:** generic keyboard injection is powerful. Only trusted cloud-side planners/admins should be allowed to enqueue sequences. The device-side bounds limit malformed or oversized payloads but are not a substitute for cloud authorization or human approval for sensitive actions.
+- `FIREBASE_PROJECT_ID`: Firebase project ID (currently `botrol-cloud`).
+- `FIREBASE_SERVICE_ACCOUNT_JSON`: complete service-account JSON, stored only as a Render secret.
+- `BOTROL_ALLOWED_ORIGINS`: comma-separated exact website origins, for example `https://botrol.vercel.app`. Add the actual Vercel production domain and any explicitly used preview/custom domains.
 
-## Deployment configuration
+Remove the old single-owner / shared-token settings after deployment:
+
+- `BOTROL_ADMIN_UID`
+- `BOTROL_ADMIN_TOKEN`
+- `BOTROL_DEVICE_TOKEN`
+
+The backend no longer uses these global credentials. Do not place the Firebase service-account JSON in GitHub, frontend code, firmware, or a chat.
+
+Add the deployed Vercel hostname to Firebase Authentication → Settings → Authorized domains. If the Vercel hostname is not `botrol.vercel.app`, use the actual hostname in both Firebase and `BOTROL_ALLOWED_ORIGINS`.
+
+## Firestore
+
+The API uses these collections:
+
+- `pairing_codes`: SHA-256 hash of one-time pairing codes, owner UID, expiry and consumed state.
+- `devices`: globally unique device ID, owner UID, SHA-256 hash of its per-device credential, firmware version, status and timestamps.
+- `tasks`: task ownership, device, summary and creation time.
+- `commands`: validated generic command payloads, owner/device IDs, queue state and execution timestamps.
+
+The API uses Firebase Admin SDK, which bypasses client Firestore rules. The root `firestore.rules` file denies direct browser/device reads and writes. Deploy those rules to the Firebase project. All client access must go through BOTROL Cloud.
+
+## Pairing and credential security
+
+- Pairing codes are random, expire after five minutes and are consumed once in a Firestore transaction.
+- The ESP32 receives a random per-device bearer credential once. The cloud stores only its SHA-256 hash.
+- The ESP32 stores the credential in NVS and never prints it to USB serial.
+- Device credentials can be revoked from the owner's Command Center.
+- A revoked physical device can be paired again using a new owner-authorized code.
+- User API routes verify Firebase ID tokens and enforce Firestore ownership.
+- Device command delivery is claimed transactionally to avoid two polls receiving the same queued command.
+- Commands are restricted to generic HID key/text/delay events with bounds validated by both cloud and firmware.
+- No arbitrary shell execution or unconstrained command payloads are accepted.
+
+## Current implementation boundaries
+
+- The cloud planner is deterministic rule-based intent matching, not a hosted LLM. It currently recognizes Notepad and Calculator.
+- Firestore persistence and multi-user ownership are implemented in the API.
+- USB-based Wi-Fi setup and automatic cloud pairing are implemented in the firmware/setup page, but must be compiled and hardware-tested before treating the firmware release as production-ready.
+- The existing Windows voice agent still uses the legacy admin-token flow and is not yet compatible with multi-user Firebase accounts. Use the web Command Center for this release.
+- BLE HID requires prior pairing with the target computer.
+- The embedded TLS trust anchor must be verified against the live Render certificate chain during hardware validation.
+
+## Deployment
 
 Render service root directory: `backend`  
 Build command: `pip install -r requirements.txt`  
 Start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
 
-Required Render environment variables:
-
-- `BOTROL_DEVICE_TOKEN`
-- `BOTROL_ADMIN_TOKEN`
-- `BOTROL_ALLOWED_ORIGINS=https://botrol-setup.vercel.app`
-
-Never commit real credentials. Provision the device token into the ESP32 privately and store the admin token in Windows Credential Manager.
-
-## Prototype limitations
-
-- The planner is deterministic rule-based intent matching, not an LLM or autonomous AI model.
-- The current cloud planner recognizes only Notepad and Calculator intents. This restriction is in the cloud, not in the ESP32 firmware.
-- Device and command state is held in process memory. Render restarts or instance sleep can clear queued commands and device registrations.
-- A global device token is used in this single-device prototype. Multi-device deployment should use unique per-device credentials and rotation/revocation.
-- BLE HID requires prior pairing with the target computer.
-- The embedded CA trust anchor must be validated against the live Render certificate chain before deployment.
+After updating Render environment variables, redeploy. Check `/health`; it should report `storage: firestore` and `status: ok`.
 
 ## Local run
 
-Set `BOTROL_DEVICE_TOKEN` and `BOTROL_ADMIN_TOKEN`, then run:
+Set `FIREBASE_PROJECT_ID` and `FIREBASE_SERVICE_ACCOUNT_JSON` in your local environment, then run:
 
 ```bash
+pip install -r requirements.txt
 uvicorn main:app --reload
 ```
 
 Open `/docs` to inspect the API.
-
-## Firebase Google sign-in (initial integration)
-
-The Command Center now uses the Firebase JavaScript SDK Google provider. The browser obtains a Firebase ID token and sends it as a Bearer token. The API verifies the token with Firebase Admin SDK, checks revocation, and restricts the admin surface to `BOTROL_ADMIN_UID`.
-
-### Firebase project setup
-
-1. Create a Firebase project in the Firebase console.
-2. Add a Web App and copy its Firebase config into the `firebaseConfig` object in `dashboard.html`. Replace all `YOUR_...` placeholders.
-3. In Firebase Authentication, enable the Google provider.
-4. Add `botrol-setup.vercel.app` to Authentication → Settings → Authorized domains.
-5. Create a Firebase service account for the backend. Store its complete JSON contents in the Render environment variable `FIREBASE_SERVICE_ACCOUNT_JSON`. Also set `FIREBASE_PROJECT_ID`.
-6. Open the Command Center, sign in with Google, copy the displayed Firebase UID, and set it as `BOTROL_ADMIN_UID` in Render.
-7. Redeploy the Render service after setting the variables.
-
-The service-account JSON is a private server secret. Never put it in the website, GitHub, firmware, or a chat. The Firebase Web App config is designed to be public; authorization is enforced by Firebase Auth and backend token verification.
-
-### Current migration boundary
-
-- Google sign-in is implemented for the browser Command Center.
-- Backend admin routes can verify Firebase ID tokens and enforce one configured owner UID.
-- Legacy `BOTROL_ADMIN_TOKEN` authentication remains as a temporary migration fallback until Firebase is configured.
-- **Firestore persistence, multi-user roles, per-user device ownership, tokenless ESP32 provisioning, and desktop-agent Google sign-in are not yet implemented.** The current device credential and in-memory command queue remain unchanged. Do not treat this commit as a completed global multi-user rollout.
