@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from ai_planner import plan_task, PlannerError
 
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 COMMAND_TTL_SECONDS = 120
 
 app = FastAPI(title="BOTROL Cloud API", version=VERSION,
@@ -60,7 +60,7 @@ class DeviceRegistration(BaseModel):
 class CommandRequest(BaseModel):
     device_id: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9._-]+$")
     # Legacy names are translated at the API boundary; firmware receives only generic capabilities.
-    command: str = Field(pattern=r"^(ping|hid_action|ble_open_notepad|ble_open_calculator)$")
+    command: str = Field(pattern=r"^hid_sequence$")
     payload: dict[str, Any] = Field(default_factory=dict)
 
 class TaskRequest(BaseModel):
@@ -71,20 +71,39 @@ class CommandResult(BaseModel):
     status: str = Field(pattern=r"^(completed|failed)$")
     message: str = Field(default="", max_length=500)
 
-def normalize_command(command: str, payload: dict[str, Any]) -> tuple[str, dict[str, str]]:
-    if command == "ping":
-        return "ping", {}
-    if command == "ble_open_notepad":
-        return "hid_action", {"action": "launch_app", "app": "notepad"}
-    if command == "ble_open_calculator":
-        return "hid_action", {"action": "launch_app", "app": "calculator"}
-    if command == "hid_action":
-        if set(payload.keys()) != {"action", "app"}:
-            raise HTTPException(status_code=422, detail="hid_action requires only action and app")
-        if payload.get("action") != "launch_app" or payload.get("app") not in {"notepad", "calculator"}:
-            raise HTTPException(status_code=422, detail="Unsupported HID action or application")
-        return "hid_action", {"action": "launch_app", "app": payload["app"]}
-    raise HTTPException(status_code=422, detail="Unsupported command")
+def normalize_command(command: str, payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    if command != "hid_sequence" or set(payload.keys()) != {"events"}:
+        raise HTTPException(status_code=422, detail="Only generic hid_sequence payloads are accepted")
+    events = payload.get("events")
+    if not isinstance(events, list) or not 1 <= len(events) <= 12:
+        raise HTTPException(status_code=422, detail="events must contain 1 to 12 HID events")
+    clean_events = []
+    for event in events:
+        if not isinstance(event, dict):
+            raise HTTPException(status_code=422, detail="Each HID event must be an object")
+        kind = event.get("type")
+        if kind == "key" and set(event) == {"type", "code", "modifiers"}:
+            code, modifiers = event["code"], event["modifiers"]
+            if (not isinstance(code, int) or isinstance(code, bool) or
+                not (4 <= code <= 39 or 40 <= code <= 44 or 79 <= code <= 82) or
+                not isinstance(modifiers, int) or isinstance(modifiers, bool) or
+                not 0 <= modifiers <= 15):
+                raise HTTPException(status_code=422, detail="Key usage or modifier is outside supported HID bounds")
+            clean_events.append({"type": "key", "code": code, "modifiers": modifiers})
+        elif kind == "text" and set(event) == {"type", "text"}:
+            value = event["text"]
+            if (not isinstance(value, str) or not 1 <= len(value) <= 80 or
+                not all(32 <= ord(char) <= 126 for char in value)):
+                raise HTTPException(status_code=422, detail="Text must be 1 to 80 printable ASCII characters")
+            clean_events.append({"type": "text", "text": value})
+        elif kind == "delay" and set(event) == {"type", "ms"}:
+            duration = event["ms"]
+            if not isinstance(duration, int) or isinstance(duration, bool) or not 0 <= duration <= 2000:
+                raise HTTPException(status_code=422, detail="Delay must be between 0 and 2000 ms")
+            clean_events.append({"type": "delay", "ms": duration})
+        else:
+            raise HTTPException(status_code=422, detail="Malformed or unsupported generic HID event")
+    return "hid_sequence", {"events": clean_events}
 
 @app.get("/health")
 def health() -> dict[str, Any]:
