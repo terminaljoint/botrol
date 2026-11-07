@@ -91,3 +91,26 @@ uvicorn main:app --reload
 ```
 
 Open `/docs` to inspect the API.
+
+## Firebase Google sign-in (initial integration)
+
+The Command Center now uses the Firebase JavaScript SDK Google provider. The browser obtains a Firebase ID token and sends it as a Bearer token. The API verifies the token with Firebase Admin SDK, checks revocation, and restricts the admin surface to `BOTROL_ADMIN_UID`.
+
+### Firebase project setup
+
+1. Create a Firebase project in the Firebase console.
+2. Add a Web App and copy its Firebase config into the `firebaseConfig` object in `dashboard.html`. Replace all `YOUR_...` placeholders.
+3. In Firebase Authentication, enable the Google provider.
+4. Add `botrol-setup.vercel.app` to Authentication → Settings → Authorized domains.
+5. Create a Firebase service account for the backend. Store its complete JSON contents in the Render environment variable `FIREBASE_SERVICE_ACCOUNT_JSON`. Also set `FIREBASE_PROJECT_ID`.
+6. Open the Command Center, sign in with Google, copy the displayed Firebase UID, and set it as `BOTROL_ADMIN_UID` in Render.
+7. Redeploy the Render service after setting the variables.
+
+The service-account JSON is a private server secret. Never put it in the website, GitHub, firmware, or a chat. The Firebase Web App config is designed to be public; authorization is enforced by Firebase Auth and backend token verification.
+
+### Current migration boundary
+
+- Google sign-in is implemented for the browser Command Center.
+- Backend admin routes can verify Firebase ID tokens and enforce one configured owner UID.
+- Legacy `BOTROL_ADMIN_TOKEN` authentication remains as a temporary migration fallback until Firebase is configured.
+- **Firestore persistence, multi-user roles, per-user device ownership, tokenless ESP32 provisioning, and desktop-agent Google sign-in are not yet implemented.** The current device credential and in-memory command queue remain unchanged. Do not treat this commit as a completed global multi-user rollout.
