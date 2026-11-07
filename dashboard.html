@@ -69,11 +69,11 @@ async function api(path,options={}){
  return d;
 }
 function updateControls(){
- const hasUser=!!currentUser,hasDevice=!!selectedDevice;
+ const hasUser=!!currentUser,selected=devices.find(d=>d.device_id===selectedDevice),active=!!selected&&selected.status==="active";
  $("refreshDevices").disabled=!hasUser;
  $("deviceSelect").disabled=!hasUser||devices.length===0;
- $("revokeDevice").disabled=!hasDevice;
- document.querySelectorAll("[data-app]").forEach(b=>b.disabled=!hasDevice);
+ $("revokeDevice").disabled=!active;
+ document.querySelectorAll("[data-app]").forEach(b=>b.disabled=!active);
 }
 async function loadDevices(){
  if(!currentUser)return;
@@ -86,7 +86,7 @@ async function loadDevices(){
    for(const device of devices)select.add(new Option(device.label+" · "+device.device_id+" · "+device.status,device.device_id));
    selectedDevice=devices.some(x=>x.device_id===previous)?previous:devices[0].device_id;
    select.value=selectedDevice;
-   show("deviceStatus",devices.length+" device(s) paired to your account. Last-seen times are shown in UTC.","good");
+   show("deviceStatus",devices.length+" device(s) associated with your account. Select an active device to send commands.","good");
   }
  }catch(e){show("deviceStatus","Could not load devices: "+e.message,"bad");}
  updateControls();
@@ -120,10 +120,10 @@ async function send(app,button){
   const started=Date.now();
   while(Date.now()-started<35000){
    await wait(700);const sd=await api("/api/v1/tasks/"+encodeURIComponent(task.task_id));
-   const step=(sd.steps||[])[0]||{};
-   if(step.status==="completed"){show("commandStatus","EXECUTED ✓\n"+(step.result||"Completed"),"good");return;}
-   if(step.status==="failed"||step.status==="expired"){show("commandStatus","EXECUTION FAILED\n"+(step.result||step.status),"bad");return;}
-   show("commandStatus","Cloud plan: "+task.summary+"\nStatus: "+(step.status||"queued")+"\nWaiting for ESP32...");
+   const steps=sd.steps||[],failed=steps.find(s=>s.status==="failed"||s.status==="expired");
+   if(failed){show("commandStatus","EXECUTION FAILED\n"+(failed.result||failed.status),"bad");return;}
+   if(steps.length&&steps.every(s=>s.status==="completed")){show("commandStatus","EXECUTED ✓\nAll "+steps.length+" step(s) completed.","good");return;}
+   show("commandStatus","Cloud plan: "+task.summary+"\nCompleted: "+steps.filter(s=>s.status==="completed").length+"/"+steps.length+"\nWaiting for ESP32...");
   }
   show("commandStatus","Task is still pending. Check ESP32 power, Wi-Fi and Bluetooth pairing.","bad");
  }catch(e){show("commandStatus","Task failed: "+e.message,"bad");}
