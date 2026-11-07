@@ -9,7 +9,7 @@ echo  ==========================================
 echo.
 echo This launcher downloads the open-source BOTROL
 echo agent files from the official GitHub repository.
-echo Source: https://github.com/TerminalJoint/botrol-setup/tree/main/desktop-agent
+echo Source: https://github.com/TerminalJoint/botrol/tree/main/desktop-agent
 echo.
 
 where py >nul 2>nul
@@ -26,7 +26,7 @@ if not exist "%BOTROL_DIR%" mkdir "%BOTROL_DIR%"
 if errorlevel 1 goto failed
 
 echo [1/4] Downloading BOTROL agent source...
-powershell.exe -NoProfile -Command "$ErrorActionPreference='Stop'; $base='https://raw.githubusercontent.com/TerminalJoint/botrol-setup/main/desktop-agent/'; $dir=Join-Path $env:LOCALAPPDATA 'BOTROL'; Invoke-WebRequest -UseBasicParsing ($base+'botrol_hotkey.py') -OutFile (Join-Path $dir 'botrol_hotkey.py'); Invoke-WebRequest -UseBasicParsing ($base+'requirements.txt') -OutFile (Join-Path $dir 'requirements.txt')"
+powershell.exe -NoProfile -Command "$ErrorActionPreference='Stop'; $base='https://raw.githubusercontent.com/TerminalJoint/botrol/main/desktop-agent/'; $dir=Join-Path $env:LOCALAPPDATA 'BOTROL'; Invoke-WebRequest -UseBasicParsing ($base+'botrol_hotkey.py') -OutFile (Join-Path $dir 'botrol_hotkey.py'); Invoke-WebRequest -UseBasicParsing ($base+'requirements.txt') -OutFile (Join-Path $dir 'requirements.txt')"
 if errorlevel 1 goto failed
 if not exist "%BOTROL_DIR%\botrol_hotkey.py" goto failed
 if not exist "%BOTROL_DIR%\requirements.txt" goto failed
