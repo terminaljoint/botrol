@@ -28,96 +28,36 @@
 <div class="notice">After downloading, open Start-BOTROL.bat yourself. A browser cannot execute downloaded files automatically. Requires Python 3.10+, Chrome or Edge, microphone and internet. First launch asks for your BOTROL admin token and stores it in Windows Credential Manager. Keep the console running, then press Win + J. No Windows security features are disabled.</div>
 </section>
 <section class="panel">
+<h2>BOTROL account</h2>
+<p class="hint">Sign in with Google. BOTROL uses Firebase Authentication, so you never need to paste an admin token into this page.</p>
+<div class="row"><button class="btn" id="googleSignIn">Continue with Google</button><button class="btn secondary" id="signOut" hidden>Sign out</button></div>
+<div class="status" id="authStatus" role="status" aria-live="polite">Checking sign-in status...</div>
+</section>
+<section class="panel">
 <h2>ESP32 connection</h2><div class="hint">Target device: <strong>BOTROL-ESP32-001</strong></div>
-<label class="field" for="adminToken">BOTROL admin token</label>
-<input id="adminToken" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your Render BOTROL_ADMIN_TOKEN">
-<div class="row">
-<button class="btn" data-app="notepad">Open Notepad</button>
-<button class="btn" data-app="calculator">Open Calculator</button>
-</div>
-<div class="status" id="commandStatus" role="status" aria-live="polite">Ready. Pair BOTROL with your computer before testing Bluetooth actions.</div>
-<div class="notice"><strong>Bluetooth requirement:</strong> Pair the ESP32 named BOTROL with your computer once. Keep the ESP32 powered and connected to Wi-Fi. BLE keyboard actions in this milestone use Windows shortcuts (Win + R). The browser itself does not control the computer.</div>
+<div class="row"><button class="btn" data-app="notepad" disabled>Open Notepad</button><button class="btn" data-app="calculator" disabled>Open Calculator</button></div>
+<div class="status" id="commandStatus" role="status" aria-live="polite">Sign in to control your paired BOTROL device.</div>
+<div class="notice"><strong>Bluetooth requirement:</strong> Pair the ESP32 named BOTROL with your computer once. Keep the ESP32 powered and connected to Wi-Fi. Commands are planned in the cloud and transmitted as generic HID events.</div>
 </section>
 <footer><a href="./provision.html">Configure / change ESP32 Wi-Fi</a> · <a href="./">Back to device setup</a> · BOTROL by Terminal Joint</footer>
 </main>
-<script>
-const API="https://botrol-cloud.onrender.com",DEVICE="BOTROL-ESP32-001";
-const $=id=>document.getElementById(id);
-function show(el,message,type=""){el.textContent=message;el.className="status"+(type?" "+type:"");}
-$("health").addEventListener("click",async()=>{const b=$("health");b.disabled=true;show($("healthStatus"),"Contacting BOTROL Cloud...");try{const r=await fetch(API+"/health");const d=await r.json();if(!r.ok)throw new Error("HTTP "+r.status);show($("healthStatus"),d.status==="ok"?"CONNECTED · "+d.service+" · database "+(d.database||"ready")+" · v"+d.version:"DEGRADED · "+d.service+" · database "+(d.database||"unknown")+" · "+(d.detail||"Check Render configuration"),d.status==="ok"?"good":"bad");}catch(e){show($("healthStatus"),"Cloud connection failed: "+e.message,"bad");}finally{b.disabled=false;}});
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+const firebaseConfig={apiKey:"YOUR_FIREBASE_WEB_API_KEY",authDomain:"YOUR_FIREBASE_PROJECT_ID.firebaseapp.com",projectId:"YOUR_FIREBASE_PROJECT_ID",appId:"YOUR_FIREBASE_WEB_APP_ID"};
+const API="https://botrol-cloud.onrender.com",DEVICE="BOTROL-ESP32-001",$=id=>document.getElementById(id);
+let auth=null,currentUser=null;
+function show(el,msg,kind=""){el.textContent=msg;el.className="status"+(kind?" "+kind:"");}
+const configured=!Object.values(firebaseConfig).some(v=>v.startsWith("YOUR_"));
+if(configured){
+ const app=initializeApp(firebaseConfig);auth=getAuth(app);
+ onAuthStateChanged(auth,user=>{currentUser=user;$("googleSignIn").hidden=!!user;$("signOut").hidden=!user;document.querySelectorAll("[data-app]").forEach(b=>b.disabled=!user);show($("authStatus"),user?"Signed in as "+(user.displayName||user.email)+" · UID: "+user.uid:"Not signed in. Continue with Google.",user?"good":"");});
+}else{$("googleSignIn").disabled=true;show($("authStatus"),"Firebase config missing. Add your Firebase Web App config after creating the project and enabling Google sign-in.","bad");}
+$("googleSignIn").addEventListener("click",async()=>{if(!auth)return;$("googleSignIn").disabled=true;try{await signInWithPopup(auth,new GoogleAuthProvider());}catch(e){show($("authStatus"),"Google sign-in failed: "+e.message,"bad");}finally{$("googleSignIn").disabled=false;}});
+$("signOut").addEventListener("click",async()=>{if(auth)await signOut(auth);});
+$("health").addEventListener("click",async()=>{const b=$("health");b.disabled=true;show($("healthStatus"),"Contacting BOTROL Cloud...");try{const r=await fetch(API+"/health");const d=await r.json();if(!r.ok)throw new Error("HTTP "+r.status);show($("healthStatus"),"CONNECTED · "+d.service+" · storage "+(d.storage||"unknown")+" · v"+d.version,d.status==="ok"?"good":"bad");}catch(e){show($("healthStatus"),"Cloud connection failed: "+e.message,"bad");}finally{b.disabled=false;}});
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-async function send(app,button){
- const token=$("adminToken").value.trim();
- if(!token){show($("commandStatus"),"Enter your BOTROL_ADMIN_TOKEN first.","bad");$("adminToken").focus();return;}
- button.disabled=true;
- show($("commandStatus"),"Asking BOTROL Cloud to plan: open "+app+"...");
- try{
-  const headers={"Authorization":"Bearer "+token,"Content-Type":"application/json"};
-  const r=await fetch(API+"/api/v1/admin/tasks/execute",{method:"POST",headers,body:JSON.stringify({device_id:DEVICE,transcript:"open "+app})});
-  const d=await r.json().catch(()=>({}));
-  if(!r.ok)throw new Error(d.detail||("HTTP "+r.status));
-  const task=d.task;
-  if(!task?.task_id)throw new Error("Cloud accepted the task but returned no task ID.");
-  show($("commandStatus"),"TASK QUEUED ✓\\nTarget: "+DEVICE+"\\nCloud plan: "+task.summary+"\\nWaiting for ESP32...");
-  const started=Date.now();
-  while(Date.now()-started<35000){
-   await wait(500);
-   const sr=await fetch(API+"/api/v1/admin/tasks/"+encodeURIComponent(task.task_id),{headers:{"Authorization":"Bearer "+token}});
-   const sd=await sr.json().catch(()=>({}));
-   if(!sr.ok)throw new Error(sd.detail||("Status check HTTP "+sr.status));
-   const steps=sd.steps||[];
-   const c=steps[0]||{};
-   if(c.status==="completed"){
-    show($("commandStatus"),"EXECUTED ✓\\nCloud plan: "+task.summary+"\\nResult: "+(c.result||"Completed"),"good");
-    return;
-   }
-   if(c.status==="failed"||c.status==="expired"){
-    show($("commandStatus"),"EXECUTION FAILED\\nReason: "+(c.result||c.status),"bad");
-    return;
-   }
-   show($("commandStatus"),"Cloud plan: "+task.summary+"\\nStatus: "+(c.status||"queued")+"\\nWaiting for ESP32 result...");
-  }
-  show($("commandStatus"),"TASK STILL PENDING\\nCheck that the ESP32 is powered, online, and paired with your computer.","bad");
- }catch(e){show($("commandStatus"),"Task failed: "+e.message,"bad");}
- finally{$("adminToken").value="";button.disabled=false;}
-}
-document.querySelectorAll("[data-app]").forEach(button=>button.addEventListener("click",e=>send(e.currentTarget.dataset.app,e.currentTarget)));
-
-async function executeTask(){
- const token=$("adminToken").value.trim(), transcript=$("taskText").value.trim(), button=$("runTask");
- if(!token){show($("taskStatus"),"Enter your BOTROL admin token in the ESP32 connection section first.","bad");return;}
- if(!transcript){show($("taskStatus"),"Speak or type a task first.","bad");return;}
- button.disabled=true;show($("taskStatus"),"BOTROL is parsing your task...");
- const headers={"Authorization":"Bearer "+token,"Content-Type":"application/json"};
- try{
-  const response=await fetch(API+"/api/v1/admin/tasks/execute",{method:"POST",headers,body:JSON.stringify({device_id:DEVICE,transcript})});
-  const data=await response.json().catch(()=>({}));
-  if(!response.ok)throw new Error(data.detail||("HTTP "+response.status));
-  const task=data.task;
-  show($("taskStatus"),"TASK: "+task.summary+"\\n"+task.steps.map((s,i)=>(i+1)+". "+s.command+" · queued").join("\\n")+"\\n\\nWaiting for ESP32...");
-  const start=Date.now();
-  while(Date.now()-start<90000){
-   await wait(500);
-   const sr=await fetch(API+"/api/v1/admin/tasks/"+encodeURIComponent(task.task_id),{headers:{"Authorization":"Bearer "+token}});
-   const sd=await sr.json().catch(()=>({}));
-   if(!sr.ok)throw new Error(sd.detail||"Could not read task status");
-   const done=sd.steps.every(s=>s.status==="completed"||s.status==="failed");
-   show($("taskStatus"),"PLAN: "+task.summary+"\\n"+sd.steps.map((s,i)=>(i+1)+". "+s.command+" · "+s.status.toUpperCase()+(s.result?" · "+s.result:"")).join("\\n"),sd.steps.some(s=>s.status==="failed")?"bad":done?"good":"");
-   if(done)return;
-  }
-  show($("taskStatus"),"Task is still pending. Check ESP32 power, Wi-Fi and Bluetooth pairing.","bad");
- }catch(error){show($("taskStatus"),"Task failed: "+error.message,"bad");}
- finally{$("adminToken").value="";button.disabled=false;}
-}
-$("runTask").addEventListener("click",executeTask);
-$("voiceButton").addEventListener("click",()=>{
- const Speech=window.SpeechRecognition||window.webkitSpeechRecognition;
- if(!Speech){show($("taskStatus"),"Speech recognition is unavailable here. Type your task instead.","bad");return;}
- const recognition=new Speech();recognition.lang="en-IN";recognition.interimResults=false;recognition.maxAlternatives=1;
- $("voiceButton").disabled=true;show($("taskStatus"),"Listening...");
- recognition.onresult=e=>{$("taskText").value=e.results[0][0].transcript;show($("taskStatus"),"Recognized: "+$("taskText").value+"\\nReview it, then click Plan & execute.");};
- recognition.onerror=e=>show($("taskStatus"),"Voice input error: "+e.error,"bad");
- recognition.onend=()=>{$("voiceButton").disabled=false;};
- recognition.start();
-});
+async function apiFetch(path,options={}){if(!currentUser)throw new Error("Sign in with Google first.");const token=await currentUser.getIdToken();return fetch(API+path,{...options,headers:{...(options.headers||{}),"Authorization":"Bearer "+token,"Content-Type":"application/json"}});}
+async function send(app,button){if(!currentUser){show($("commandStatus"),"Sign in with Google first.","bad");return;}button.disabled=true;show($("commandStatus"),"Asking BOTROL Cloud to plan: open "+app+"...");try{const r=await apiFetch("/api/v1/admin/tasks/execute",{method:"POST",body:JSON.stringify({device_id:DEVICE,transcript:"open "+app})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.detail||("HTTP "+r.status));const task=d.task;if(!task?.task_id)throw new Error("Cloud returned no task ID.");show($("commandStatus"),"TASK QUEUED ✓\nTarget: "+DEVICE+"\nCloud plan: "+task.summary+"\nWaiting for ESP32...");const started=Date.now();while(Date.now()-started<35000){await wait(600);const sr=await apiFetch("/api/v1/admin/tasks/"+encodeURIComponent(task.task_id));const sd=await sr.json().catch(()=>({}));if(!sr.ok)throw new Error(sd.detail||("Status HTTP "+sr.status));const c=(sd.steps||[])[0]||{};if(c.status==="completed"){show($("commandStatus"),"EXECUTED ✓\n"+(c.result||"Completed"),"good");return;}if(c.status==="failed"||c.status==="expired"){show($("commandStatus"),"EXECUTION FAILED\n"+(c.result||c.status),"bad");return;}show($("commandStatus"),"Cloud plan: "+task.summary+"\nStatus: "+(c.status||"queued")+"\nWaiting for ESP32 result...");}show($("commandStatus"),"Task is still pending. Check ESP32 power, Wi-Fi and Bluetooth pairing.","bad");}catch(e){show($("commandStatus"),"Task failed: "+e.message,"bad");}finally{button.disabled=!currentUser;}}
+document.querySelectorAll("[data-app]").forEach(b=>b.addEventListener("click",e=>send(e.currentTarget.dataset.app,e.currentTarget)));
 </script></body></html>
