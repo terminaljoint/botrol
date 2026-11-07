@@ -41,7 +41,7 @@
 <h2>4 · Pair this ESP32 with your account</h2>
 <p class="muted">BOTROL creates a one-time pairing code, sends it directly over USB, and exchanges it for a unique device credential. The credential is saved in ESP32 NVS and is never shown in this page.</p>
 <label class="field" for="deviceLabel">Device name</label><input id="deviceLabel" maxlength="60" value="My BOTROL ESP32">
-<div class="row"><button id="pair" disabled>Pair device automatically</button></div>
+<div class="row"><button id="pair" disabled>Pair device automatically</button><button class="secondary" id="forgetPairing" disabled>Clear local pairing</button></div>
 <div class="status" id="pairStatus">Sign in and connect the ESP32 to Wi-Fi before pairing.</div>
 <div class="notice">Pairing codes expire after five minutes and can only be used once. If a device is already paired, revoke it from its owner account before pairing it again.</div>
 </section>
@@ -70,6 +70,7 @@ function updateButtons(){
   $("connect").disabled=!user||connected;
   $("saveWifi").disabled=!user||!connected;
   $("pair").disabled=!user||!connected||!wifiConnected||cloudPaired;
+  $("forgetPairing").disabled=!connected||!cloudPaired;
 }
 async function api(path,options={}){
   if(!user)throw new Error("Sign in with Google first.");
@@ -92,6 +93,7 @@ function parseLine(line){
     if(data.state==="wifi_connected")show("wifiStatus","Connected to "+(data.ssid||"your Wi-Fi")+".","good");
     if(data.state==="wifi_failed")show("wifiStatus",data.detail||"Wi-Fi connection failed.","bad");
     if(data.state==="cloud_registered")show("pairStatus",data.detail||"Device paired successfully.","good");
+    if(data.state==="pairing_cleared")show("pairStatus",data.detail||"Local pairing cleared.","good");
     if(data.state==="cloud_pair_failed")show("pairStatus",data.detail||"Pairing failed. Generate a new code and retry.","bad");
     updateButtons();
   }catch(e){show("deviceStatus","Could not parse ESP32 status: "+e.message,"bad");}
@@ -150,6 +152,12 @@ $("saveWifi").onclick=async()=>{
   try{await sendSerial({type:"wifi_config",ssid,password});$("password").value="";show("wifiStatus","Wi-Fi settings sent. Waiting for ESP32 connection...");}
   catch(e){show("wifiStatus",e.message,"bad");}
   finally{updateButtons();}
+};
+$("forgetPairing").onclick=async()=>{
+  if(!confirm("Clear the saved device credential from this ESP32? Revoke it in the BOTROL dashboard first if it is still active."))return;
+  try{await sendSerial({type:"forget_pairing"});cloudPaired=false;show("pairStatus","Local device credential reset requested. Revoke the old device in the dashboard, then pair again.","good");}
+  catch(e){show("pairStatus",e.message,"bad");}
+  updateButtons();
 };
 $("pair").onclick=async()=>{
   $("pair").disabled=true;show("pairStatus","Creating a one-time pairing session...");
