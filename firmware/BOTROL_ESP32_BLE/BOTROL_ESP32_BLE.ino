@@ -4,16 +4,16 @@
 #include <ArduinoJson.h>
 #include <HijelHID_BLEKeyboard.h>
 
-// BOTROL ESP32 hardware endpoint.
-// Task interpretation and task-specific command creation live in BOTROL Cloud.
-// Firmware exposes a narrow, validated BLE-HID capability interface only.
+// BOTROL ESP32: generic BLE-HID hardware executor.
+// Task names, application choices, intent parsing and action planning belong in the cloud.
+// This firmware knows only generic HID events: key, text and bounded delay.
 
 const char* WIFI_SSID = "YOUR_WIFI_NAME";
 const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 const char* BOTROL_SERVER = "https://botrol-cloud.onrender.com";
 const char* DEVICE_ID = "BOTROL-ESP32-001";
 const char* DEVICE_TOKEN = "YOUR_BOTROL_DEVICE_TOKEN";
-const char* FIRMWARE_VERSION = "0.3.0";
+const char* FIRMWARE_VERSION = "0.4.0";
 
 const unsigned long POLL_INTERVAL_MS = 5000;
 unsigned long lastPollAt = 0;
@@ -21,8 +21,6 @@ WiFiClientSecure secureClient;
 HijelHID_BLEKeyboard keyboard("BOTROL");
 bool commandInProgress = false;
 
-// GlobalSign Root CA (trust anchor in the observed Render chain). Validate the server certificate chain;
-// never use setInsecure() for cloud command traffic.
 static const char BOTROL_ROOT_CA[] PROGMEM = R"BOTROL_CA(
 -----BEGIN CERTIFICATE-----
 MIIDejCCAmKgAwIBAgIQf+UwvzMTQ77dghYQST2KGzANBgkqhkiG9w0BAQsFADBX
@@ -52,8 +50,7 @@ bool httpsRequest(const String& method, const String& path,
   if (WiFi.status() != WL_CONNECTED) return false;
   HTTPClient http;
   secureClient.setCACert(BOTROL_ROOT_CA);
-  String url = String(BOTROL_SERVER) + path;
-  if (!http.begin(secureClient, url)) return false;
+  if (!http.begin(secureClient, String(BOTROL_SERVER) + path)) return false;
   http.setTimeout(10000);
   http.addHeader("Authorization", String("Bearer ") + DEVICE_TOKEN);
   http.addHeader("Content-Type", "application/json");
@@ -73,7 +70,6 @@ bool registerDevice() {
   serializeJson(doc, body);
   bool ok = httpsRequest("POST", "/api/v1/devices/register", body, response);
   Serial.println(ok ? "[BOTROL] Registered with cloud." : "[BOTROL] Registration failed.");
-  if (ok) Serial.println(response);
   return ok;
 }
 
@@ -86,62 +82,96 @@ void reportResult(const String& commandId, const char* status, const String& mes
   String path = String("/api/v1/devices/") + DEVICE_ID +
                 "/commands/" + commandId + "/result";
   if (!httpsRequest("POST", path, body, response))
-    Serial.println("[BOTROL] Could not report command result.");
+    Serial.println("[BOTROL] Could not report execution result.");
 }
 
-bool launchApprovedApp(const String& app, String& result) {
+// USB/BLE HID usage IDs are generic keyboard usages, not task identifiers.
+bool validKeyUsage(int code) {
+  return (code >= 4 && code <=  39) || (code >= 40 && code <= 44) ||
+         (code >= 79 && code <= 82);
+}
+
+bool executeHidSequence(JsonArray events, String& result) {
   if (!keyboard.isPaired()) {
     result = "BOTROL BLE keyboard is not paired with the computer.";
     return false;
   }
-
-  // These are hardware-level capabilities, not task plans. The cloud chooses
-  // an approved app identifier; firmware rejects every other value.
-  const char* runText = nullptr;
-  if (app == "notepad") runText = "notepad";
-  else if (app == "calculator") runText = "calc";
-  else {
-    result = "Application is not in the local safety allowlist.";
+  if (events.isNull() || events.size() == 0 || events.size() > 12) {
+    result = "Invalid HID event sequence length.";
     return false;
   }
 
-  keyboard.tap(KEY_R, KEY_MOD_LGUI);
-  delay(900);
-  keyboard.print(runText);
-  delay(250);
-  keyboard.tap(KEY_RETURN);
-  result = String("Requested launch of ") + app + " through BLE HID.";
+  for (JsonObject event : events) {
+    const char* type = event["type"] | "";
+    if (strcmp(type, "key") == 0) {
+      if (event.size() != 3 || !event["code"].is<int>() ||
+          !event["modifiers"].is<int>()) {
+        result = "Malformed key event.";
+        return false;
+      }
+      int code = event["code"].as<int>();
+      int modifiers = event["modifiers"].as<int>();
+      if (!validKeyUsage(code) || modifiers < 0 || modifiers > 15) {
+        result = "Key event outside generic HID bounds.";
+        return false;
+      }
+      keyboard.tap((uint8_t)code, (uint8_t)modifiers);
+    } else if (strcmp(type, "text") == 0) {
+      if (event.size() != 2 || !event["text"].is<const char*>()) {
+        result = "Malformed text event.";
+        return false;
+      }
+      const char* value = event["text"];
+      size_t length = strlen(value);
+      if (length == 0 || length > 80) {
+        result = "Text event length outside bounds.";
+        return false;
+      }
+      for (size_t i = 0; i < length; i++) {
+        if (value[i] < 32 || value[i] > 126) {
+          result = "Text event must contain printable ASCII only.";
+          return false;
+        }
+      }
+      keyboard.print(value);
+    } else if (strcmp(type, "delay") == 0) {
+      if (event.size() != 2 || !event["ms"].is<int>()) {
+        result = "Malformed delay event.";
+        return false;
+      }
+      int duration = event["ms"].as<int>();
+      if (duration < 0 || duration > 2000) {
+        result = "Delay event outside bounds.";
+        return false;
+      }
+      delay((unsigned long)duration);
+    } else {
+      result = "Unknown generic HID event type.";
+      return false;
+    }
+    delay(35);
+  }
+  result = "Generic HID event sequence executed.";
   return true;
 }
 
 void processCommand(JsonObject command) {
   String commandId = command["command_id"] | "";
-  String commandName = command["command"] | "";
   if (commandId.length() == 0 || commandId.length() > 64) {
     Serial.println("[BOTROL] Rejected command with invalid ID.");
     return;
   }
-
-  if (commandName == "ping") {
-    reportResult(commandId, "completed", "pong");
+  if (String(command["command"] | "") != "hid_sequence") {
+    reportResult(commandId, "failed", "Unsupported protocol operation.");
     return;
   }
-
-  if (commandName != "hid_action") {
-    reportResult(commandId, "failed", "Unsupported capability.");
-    return;
-  }
-
   JsonObject payload = command["payload"].as<JsonObject>();
-  if (payload.isNull() || payload.size() != 2 ||
-      String(payload["action"] | "") != "launch_app") {
-    reportResult(commandId, "failed", "Invalid action payload.");
+  if (payload.isNull() || payload.size() != 1 || !payload["events"].is<JsonArray>()) {
+    reportResult(commandId, "failed", "Invalid generic HID sequence payload.");
     return;
   }
-
-  String app = payload["app"] | "";
   String result;
-  bool ok = launchApprovedApp(app, result);
+  bool ok = executeHidSequence(payload["events"].as<JsonArray>(), result);
   reportResult(commandId, ok ? "completed" : "failed", result);
 }
 
@@ -151,7 +181,7 @@ void pollCommands() {
   String path = String("/api/v1/devices/") + DEVICE_ID + "/commands/next";
   String response;
   if (httpsRequest("GET", path, "", response)) {
-    StaticJsonDocument<1536> doc;
+    StaticJsonDocument<3072> doc;
     DeserializationError error = deserializeJson(doc, response);
     if (error) Serial.println("[BOTROL] Invalid cloud response JSON.");
     else if (!doc["command"].isNull())
@@ -178,7 +208,7 @@ void connectWiFi() {
 void setup() {
   Serial.begin(115200);
   delay(1000);
-  Serial.println("\n[BOTROL] ESP32 cloud hardware endpoint v0.3.0");
+  Serial.println("\n[BOTROL] Generic ESP32 cloud HID executor v0.4.0");
   keyboard.begin();
   Serial.println("[BLE] Pair the device named BOTROL with Windows.");
   connectWiFi();
