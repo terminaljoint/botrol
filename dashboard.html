@@ -56,9 +56,9 @@ async function send(app,button){
   const r=await fetch(API+"/api/v1/admin/tasks/execute",{method:"POST",headers,body:JSON.stringify({device_id:DEVICE,transcript:"open "+app})});
   const d=await r.json().catch(()=>({}));
   if(!r.ok)throw new Error(d.detail||("HTTP "+r.status));
-  const id=d.command?.command_id;
-  if(!id)throw new Error("Cloud accepted the request but returned no command ID.");
-  show($("commandStatus"),"COMMAND QUEUED ✓\nTarget: "+DEVICE+"\nCommand: "+command+"\nWaiting for ESP32...");
+  const task=d.task;
+  if(!task?.task_id)throw new Error("Cloud accepted the task but returned no task ID.");
+  show($("commandStatus"),"TASK QUEUED ✓\\nTarget: "+DEVICE+"\\nCloud plan: "+task.summary+"\\nWaiting for ESP32...");
   const started=Date.now();
   while(Date.now()-started<35000){
    await wait(500);
@@ -68,17 +68,17 @@ async function send(app,button){
    const steps=sd.steps||[];
    const c=steps[0]||{};
    if(c.status==="completed"){
-    show($("commandStatus"),"EXECUTED ✓\nCloud plan: "+task.summary+"\nResult: "+(c.result||"Completed"),"good");
+    show($("commandStatus"),"EXECUTED ✓\\nCloud plan: "+task.summary+"\\nResult: "+(c.result||"Completed"),"good");
     return;
    }
    if(c.status==="failed"||c.status==="expired"){
-    show($("commandStatus"),"EXECUTION FAILED\nReason: "+(c.result||c.status),"bad");
+    show($("commandStatus"),"EXECUTION FAILED\\nReason: "+(c.result||c.status),"bad");
     return;
    }
-   show($("commandStatus"),"Cloud plan: "+task.summary+"\nStatus: "+(c.status||"queued")+"\nWaiting for ESP32 result...");
+   show($("commandStatus"),"Cloud plan: "+task.summary+"\\nStatus: "+(c.status||"queued")+"\\nWaiting for ESP32 result...");
   }
-  show($("commandStatus"),"COMMAND STILL PENDING\nThe cloud has not received an execution result yet. Check that the ESP32 is powered, online, and paired with your computer.","bad");
- }catch(e){show($("commandStatus"),"Command failed: "+e.message,"bad");}
+  show($("commandStatus"),"TASK STILL PENDING\\nCheck that the ESP32 is powered, online, and paired with your computer.","bad");
+ }catch(e){show($("commandStatus"),"Task failed: "+e.message,"bad");}
  finally{$("adminToken").value="";button.disabled=false;}
 }
 document.querySelectorAll("[data-app]").forEach(button=>button.addEventListener("click",e=>send(e.currentTarget.dataset.app,e.currentTarget)));
