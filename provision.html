@@ -31,10 +31,10 @@
 <section class="panel">
 <h2>3 · Configure Wi-Fi</h2>
 <p class="muted">Wi-Fi credentials are sent directly over USB and stored in ESP32 NVS. Use a 2.4 GHz Wi-Fi network.</p>
-<label class="field" for="ssid">Wi-Fi network name (SSID)</label><input id="ssid" maxlength="32" autocomplete="off" placeholder="Your Wi-Fi name">
+<label class="field" for="ssid">Nearby Wi-Fi networks</label><div class="row"><select id="ssid" style="flex:1;min-width:220px;background:#080f1d;border:1px solid var(--line);border-radius:11px;padding:13px;color:var(--text);font:inherit"><option value="">Scanning will start after USB connects</option></select><button class="secondary" id="scanWifi" disabled>Rescan</button></div>
 <label class="field" for="password">Wi-Fi password</label><input id="password" maxlength="63" type="password" autocomplete="new-password" placeholder="Password">
 <div class="row"><button id="saveWifi" disabled>Save and connect</button></div>
-<div class="status" id="wifiStatus">Connect the ESP32 first.</div>
+<div class="status" id="wifiStatus">Nearby networks will be scanned automatically after the ESP32 responds.</div>
 </section>
 
 <section class="panel">
@@ -64,12 +64,13 @@ const firebaseConfig={
 const API="https://botrol-cloud.onrender.com";
 const $=id=>document.getElementById(id);
 const auth=getAuth(initializeApp(firebaseConfig));
-let user=null,port=null,reader=null,writer=null,connected=false,rxBuffer="",wifiConnected=false,cloudPaired=false;
+let user=null,port=null,reader=null,writer=null,connected=false,rxBuffer="",wifiConnected=false,cloudPaired=false,statusSeen=false,scanBusy=false;
 
 function show(id,message,kind=""){const el=$(id);el.textContent=message;el.className="status"+(kind?" "+kind:"");}
 function updateButtons(){
   $("connect").disabled=!user||connected;
-  $("saveWifi").disabled=!user||!connected;
+  $("saveWifi").disabled=!user||!connected||!$("ssid").value;
+  $("scanWifi").disabled=!connected||scanBusy;
   $("pair").disabled=!user||!connected||!wifiConnected||cloudPaired;
   $("forgetPairing").disabled=!connected||!cloudPaired;
 }
@@ -86,11 +87,26 @@ function parseLine(line){
   if(!trimmed.startsWith("{"))return;
   try{
     const data=JSON.parse(trimmed);
+    if(data.type==="wifi_scan_results"){
+      const select=$("ssid"),previous=select.value;
+      select.replaceChildren();
+      const networks=Array.isArray(data.networks)?data.networks:[];
+      if(!networks.length)select.add(new Option("No networks found. Rescan.",""));
+      networks.forEach(n=>{
+        const label=(n.ssid||"(hidden network)")+" · "+n.rssi+" dBm"+(n.secure?" · secured":" · open");
+        select.add(new Option(label,n.ssid||""));
+      });
+      if(networks.some(n=>n.ssid===previous))select.value=previous;
+      scanBusy=false;show("wifiStatus",networks.length+" nearby network(s) found. Select your network and enter its password.","good");
+      updateButtons();return;
+    }
     if(data.type!=="status")return;
+    statusSeen=true;
     wifiConnected=data.wifi==="connected";
     cloudPaired=data.cloud==="registered";
     const detail=[data.state,data.detail,data.wifi==="connected"?"Wi-Fi: "+(data.ssid||"connected"):"Wi-Fi: disconnected",cloudPaired?"Cloud: paired":"Cloud: not paired",data.device_id?"Device ID: "+data.device_id:""].filter(Boolean).join("\n");
     show("deviceStatus",detail,cloudPaired?"good":data.state==="error"||data.state==="wifi_failed"?"bad":"");
+    if(data.state==="wifi_scanning"){scanBusy=true;show("wifiStatus","Scanning nearby Wi-Fi networks...");}
     if(data.state==="wifi_connected")show("wifiStatus","Connected to "+(data.ssid||"your Wi-Fi")+".","good");
     if(data.state==="wifi_failed")show("wifiStatus",data.detail||"Wi-Fi connection failed.","bad");
     if(data.state==="cloud_registered")show("pairStatus",data.detail||"Device paired successfully.","good");
@@ -123,7 +139,19 @@ async function connect(){
     reader=decoder.readable.getReader();writer=port.writable.getWriter();
     $("disconnect").disabled=false;
     show("connection","USB serial connected. Reading ESP32 status...","good");
-    readLoop();await sendSerial({type:"get_status"});updateButtons();
+    readLoop();
+    show("connection","USB connected. Waiting for ESP32 boot and status handshake...","good");
+    await new Promise(resolve=>setTimeout(resolve,1600));
+    for(let attempt=0;attempt<3&&!statusSeen;attempt++){
+      await sendSerial({type:"get_status"});
+      await new Promise(resolve=>setTimeout(resolve,1200));
+    }
+    if(!statusSeen)show("connection","USB port opened, but ESP32 did not answer. Check that BOTROL firmware v1.0.0 is flashed, then press Disconnect and reconnect.","bad");
+    else{
+      show("connection","ESP32 handshake successful. Scanning nearby Wi-Fi networks...","good");
+      await scanWifi();
+    }
+    updateButtons();
   }catch(e){connected=false;port=null;show("connection",e.message||String(e),"bad");updateButtons();}
 }
 async function disconnect(){
@@ -132,7 +160,7 @@ async function disconnect(){
   try{if(writer)writer.releaseLock();}catch{}
   try{if(port)await port.close();}catch{}
   reader=null;writer=null;port=null;$("disconnect").disabled=true;
-  show("connection","USB serial disconnected.");updateButtons();
+  statusSeen=false;show("connection","USB serial disconnected.");updateButtons();
 }
 $("googleSignIn").onclick=async()=>{
   try{await signInWithPopup(auth,new GoogleAuthProvider());}
@@ -145,12 +173,21 @@ onAuthStateChanged(auth,async current=>{
   show("authStatus",user?"Signed in as "+(user.displayName||user.email)+" · "+user.uid:"Not signed in. Continue with Google.",user?"good":"");
   updateButtons();
 });
+async function scanWifi(){
+  if(!connected||scanBusy)return;
+  scanBusy=true;updateButtons();show("wifiStatus","Scanning nearby 2.4 GHz Wi-Fi networks...");
+  try{await sendSerial({type:"wifi_scan"});}
+  catch(e){show("wifiStatus","Wi-Fi scan request failed: "+e.message,"bad");}
+  setTimeout(()=>{if(scanBusy){scanBusy=false;show("wifiStatus","Scan timed out. Check the firmware version and try Rescan.","bad");updateButtons();}},12000);
+}
+$("scanWifi").onclick=scanWifi;
+$("ssid").onchange=updateButtons;
 $("connect").onclick=connect;$("disconnect").onclick=disconnect;
 $("saveWifi").onclick=async()=>{
   const ssid=$("ssid").value.trim(),password=$("password").value;
-  if(!ssid||ssid.length>32||password.length>63){show("wifiStatus","Enter a valid SSID and password (maximum 32 and 63 characters).","bad");return;}
+  if(!ssid||ssid.length>32||password.length>63){show("wifiStatus","Select a network and enter a valid password (maximum 63 characters).","bad");return;}
   $("saveWifi").disabled=true;
-  try{await sendSerial({type:"wifi_config",ssid,password});$("password").value="";show("wifiStatus","Wi-Fi settings sent. Waiting for ESP32 connection...");}
+  try{await sendSerial({type:"wifi_config",ssid,password});$("password").value="";show("wifiStatus","Credentials sent. ESP32 is connecting...");}
   catch(e){show("wifiStatus",e.message,"bad");}
   finally{updateButtons();}
 };
