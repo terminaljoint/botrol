@@ -1,14 +1,41 @@
 # BOTROL Cloud API
 
-BOTROL is a cloud-coordinated IoT desktop-control prototype. The cloud interprets supported user intents, creates structured commands, queues them, and serves them to an authenticated ESP32 endpoint over HTTPS. The ESP32 performs only a narrow set of locally validated BLE-HID capabilities.
+BOTROL is a cloud-coordinated desktop-control prototype. Task interpretation, application selection, action planning and command construction happen in BOTROL Cloud. The ESP32 is a generic BLE-HID event executor.
 
 ## Architecture
 
-1. Windows voice panel submits a transcript to BOTROL Cloud using the admin credential.
-2. The cloud-side deterministic planner converts supported intents into structured actions.
-3. The cloud validates the action and queues a uniquely identified command with a two-minute expiry.
-4. ESP32 polls the cloud using its device credential, validates the received schema and local capability allowlist, then performs the hardware action.
-5. ESP32 reports the result to the cloud.
+1. The Windows voice agent submits a task transcript to BOTROL Cloud using the admin credential.
+2. The cloud-side planner interprets the task and builds a generic HID event sequence.
+3. The cloud validates the sequence and queues it for the authenticated ESP32.
+4. The ESP32 polls over HTTPS, validates generic event bounds and emits BLE keyboard events.
+5. The ESP32 reports the execution result to the cloud.
+
+## Firmware boundary
+
+The firmware contains **no task names, application names, task-specific command handlers, intent parsing, or task planning**. It does not know what Notepad or Calculator is. It implements only three generic hardware event types:
+
+- `key`: a USB HID keyboard usage code plus modifier bitmask
+- `text`: printable ASCII text
+- `delay`: a bounded pause in milliseconds
+
+Example cloud-to-device payload:
+
+```json
+{
+  "command": "hid_sequence",
+  "payload": {
+    "events": [
+      {"type": "key", "code": 21, "modifiers": 8},
+      {"type": "delay", "ms": 900},
+      {"type": "text", "text": "notepad"},
+      {"type": "delay", "ms": 250},
+      {"type": "key", "code": 40, "modifiers": 0}
+    ]
+  }
+}
+```
+
+The example sequence is planned by the cloud. The ESP32 only interprets generic HID usages and emits keyboard events. HID usage 21 is the R key, modifier bit 8 is GUI, and usage 40 is Enter.
 
 ## Cloud routes
 
@@ -18,33 +45,19 @@ BOTROL is a cloud-coordinated IoT desktop-control prototype. The cloud interpret
 - `POST /api/v1/devices/{device_id}/commands/{command_id}/result`
 - Admin routes under `/api/v1/admin/*`
 
-## Command model
+## Security controls and limits
 
-The firmware does not contain task-specific command names such as `ble_open_notepad`. The cloud emits a generic capability command:
-
-```json
-{
-  "command": "hid_action",
-  "payload": {
-    "action": "launch_app",
-    "app": "notepad"
-  }
-}
-```
-
-The firmware accepts only the `launch_app` action and the locally approved application identifiers `notepad` and `calculator`. It rejects unknown commands, malformed payloads and unsupported applications. It does not execute arbitrary shell commands, scripts, URLs or raw keyboard sequences.
-
-## Security controls in this prototype
-
-- HTTPS certificate validation in ESP32 firmware using a trusted CA root (no insecure TLS bypass).
+- HTTPS certificate validation in ESP32 firmware using a trusted CA root.
 - Separate admin and device bearer credentials, compared in constant time by the API.
 - Admin-only task submission and status routes.
 - Device-only registration, command polling and result reporting routes.
-- Strict command and payload allowlists on the cloud and device.
-- UUID command identifiers and one-time queued-to-delivered state transition.
+- Cloud and device both validate event structure, key usage ranges, modifier masks, printable text and delay limits.
+- Maximum 12 events per sequence; text length is limited to 80 characters; each delay is limited to 2 seconds.
+- UUID command identifiers and queued-to-delivered state transition.
 - Two-minute expiry for commands that remain queued.
-- Result reports are accepted only for commands in the delivered state.
-- No arbitrary command execution.
+- No firmware-side task-specific command vocabulary.
+
+**Important security boundary:** generic keyboard injection is powerful. Only trusted cloud-side planners/admins should be allowed to enqueue sequences. The device-side bounds limit malformed or oversized payloads but are not a substitute for cloud authorization or human approval for sensitive actions.
 
 ## Deployment configuration
 
@@ -58,16 +71,16 @@ Required Render environment variables:
 - `BOTROL_ADMIN_TOKEN`
 - `BOTROL_ALLOWED_ORIGINS=https://botrol-setup.vercel.app`
 
-Never commit real credentials. Provision the same device token into the ESP32 privately and store the admin token in Windows Credential Manager.
+Never commit real credentials. Provision the device token into the ESP32 privately and store the admin token in Windows Credential Manager.
 
 ## Prototype limitations
 
-- The current planner is deterministic rule-based intent matching, not an LLM or autonomous AI model.
-- Device and command state is held in process memory. Render restarts or instance sleep can clear queued commands and device registrations; persistent database storage is a future requirement.
-- The current prototype supports only ping, Notepad and Calculator launch actions.
-- ESP32 certificate trust must be checked against the live Render certificate chain during device deployment. If the hosting CA changes, update the embedded trusted root.
-- A global device token is used in this single-device prototype. A multi-device deployment should use unique per-device credentials and rotation/revocation.
+- The planner is deterministic rule-based intent matching, not an LLM or autonomous AI model.
+- The current cloud planner recognizes only Notepad and Calculator intents. This restriction is in the cloud, not in the ESP32 firmware.
+- Device and command state is held in process memory. Render restarts or instance sleep can clear queued commands and device registrations.
+- A global device token is used in this single-device prototype. Multi-device deployment should use unique per-device credentials and rotation/revocation.
 - BLE HID requires prior pairing with the target computer.
+- The embedded CA trust anchor must be validated against the live Render certificate chain before deployment.
 
 ## Local run
 
