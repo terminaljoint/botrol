@@ -295,6 +295,13 @@ void handleSerialCommand(const String& line) {
       return;
     }
     pairWithCode(String(code));
+  } else if (strcmp(type, "forget_pairing") == 0) {
+    preferences.begin("botrol", false);
+    preferences.remove("device_token");
+    preferences.end();
+    deviceToken = "";
+    cloudPaired = false;
+    emitStatus("pairing_cleared", "Local device credential cleared. Revoke the old device in the dashboard before pairing again.");
   } else {
     emitStatus("error", "Unknown USB serial command.");
   }
