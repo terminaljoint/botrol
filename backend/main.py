@@ -247,7 +247,7 @@ def pair_device(body: PairDeviceRequest) -> dict[str, Any]:
         if pairing.get("consumed") or not expiry or expiry <= now_dt():
             raise HTTPException(status_code=401, detail="Pairing code is invalid, expired or already used.")
         existing = device_ref.get(transaction=txn)
-        if existing.exists:
+        if existing.exists and (existing.to_dict() or {}).get("status") == "active":
             raise HTTPException(status_code=409, detail="This ESP32 is already paired. Revoke it from its owner account before pairing again.")
         created = now_dt()
         txn.update(code_ref, {"consumed": True, "consumed_at": created, "device_id": body.device_id})
@@ -321,13 +321,32 @@ def get_next_command(device_id: str, device: dict[str, Any] = Depends(require_de
     if not pending:
         return {"ok": True, "command": None}
     pending.sort(key=lambda pair: (pair[1].get("created_at") or current, pair[1].get("step") or 0))
-    snap, command = pending[0]
-    snap.reference.update({"status": "delivered", "delivered_at": now_dt()})
-    command["status"] = "delivered"
-    command["delivered_at"] = now_dt()
-    command["created_at"] = iso(command.get("created_at"))
-    command["expires_at"] = iso(command.get("expires_at"))
-    return {"ok": True, "command": command}
+    for candidate, candidate_data in pending:
+        transaction = db.transaction()
+
+        @firestore.transactional
+        def claim(txn):
+            fresh = candidate.reference.get(transaction=txn)
+            if not fresh.exists:
+                return False
+            fresh_data = fresh.to_dict() or {}
+            if fresh_data.get("status") != "queued":
+                return False
+            expiry = fresh_data.get("expires_at")
+            claimed_at = now_dt()
+            if expiry and expiry <= claimed_at:
+                txn.update(candidate.reference, {"status": "expired"})
+                return False
+            txn.update(candidate.reference, {"status": "delivered", "delivered_at": claimed_at})
+            return True
+
+        if claim(transaction):
+            candidate_data["status"] = "delivered"
+            candidate_data["delivered_at"] = now_dt()
+            candidate_data["created_at"] = iso(candidate_data.get("created_at"))
+            candidate_data["expires_at"] = iso(candidate_data.get("expires_at"))
+            return {"ok": True, "command": candidate_data}
+    return {"ok": True, "command": None}
 
 
 @app.post("/api/v1/devices/{device_id}/commands/{command_id}/result")
