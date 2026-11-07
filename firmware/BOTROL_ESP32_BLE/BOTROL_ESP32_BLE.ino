@@ -21,7 +21,7 @@ WiFiClientSecure secureClient;
 HijelHID_BLEKeyboard keyboard("BOTROL");
 bool commandInProgress = false;
 
-// Google Trust Services GTS Root R4. Validate the server certificate chain;
+// GlobalSign Root CA (trust anchor in the observed Render chain). Validate the server certificate chain;
 // never use setInsecure() for cloud command traffic.
 static const char BOTROL_ROOT_CA[] PROGMEM = R"BOTROL_CA(
 -----BEGIN CERTIFICATE-----
