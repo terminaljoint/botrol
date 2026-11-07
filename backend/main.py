@@ -110,7 +110,12 @@ def get_next_command(device_id: str, _: str = Depends(require_device_token)) -> 
     with _LOCK:
         device = _DEVICES.get(device_id)
         if not device:
-            raise HTTPException(status_code=404, detail="Device is not registered")
+            # The service uses volatile memory in this prototype. Recreate the
+            # authenticated device record after a Render restart so polling recovers.
+            timestamp = now()
+            device = {"device_id": device_id, "firmware_version": "unknown",
+                      "registered_at": timestamp, "last_seen": timestamp, "status": "online"}
+            _DEVICES[device_id] = device
         device.update({"last_seen": now(), "status": "online"})
         current = now_dt()
         for item in _COMMANDS.values():
