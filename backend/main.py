@@ -1,4 +1,5 @@
 import os
+import json
 import secrets
 import threading
 from datetime import datetime, timedelta, timezone
@@ -10,9 +11,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
+try:
+    import firebase_admin
+    from firebase_admin import auth as firebase_auth, credentials
+except ImportError:
+    firebase_admin = None
+    firebase_auth = None
+    credentials = None
+
 from ai_planner import plan_task, PlannerError
 
-VERSION = "0.7.0"
+VERSION = "0.8.0"
 COMMAND_TTL_SECONDS = 120
 
 app = FastAPI(title="BOTROL Cloud API", version=VERSION,
@@ -49,9 +58,38 @@ def require_device_token(credentials: HTTPAuthorizationCredentials | None = Depe
     _check_bearer(credentials.credentials if credentials else "", "BOTROL_DEVICE_TOKEN", "Device")
     return "device"
 
-def require_admin(authorization: str | None = Header(default=None)) -> None:
+def _firebase_app():
+    if firebase_admin is None:
+        return None
+    try:
+        return firebase_admin.get_app()
+    except ValueError:
+        raw = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "")
+        project_id = os.getenv("FIREBASE_PROJECT_ID", "")
+        if not raw or not project_id:
+            return None
+        try:
+            cert = credentials.Certificate(json.loads(raw))
+            return firebase_admin.initialize_app(cert, {"projectId": project_id})
+        except Exception as exc:
+            raise RuntimeError("Firebase Admin initialization failed; check Firebase service-account configuration") from exc
+
+def require_admin(authorization: str | None = Header(default=None)) -> str:
     supplied = authorization.removeprefix("Bearer ").strip() if authorization else ""
+    app_instance = _firebase_app()
+    if app_instance is not None:
+        try:
+            decoded = firebase_auth.verify_id_token(supplied, app=app_instance, check_revoked=True)
+        except Exception:
+            raise HTTPException(status_code=401, detail="Invalid or expired Firebase sign-in. Sign in again.")
+        allowed_uid = os.getenv("BOTROL_ADMIN_UID", "")
+        if not allowed_uid:
+            raise HTTPException(status_code=503, detail="Set BOTROL_ADMIN_UID to the Firebase UID authorized to administer this BOTROL instance.")
+        if not secrets.compare_digest(str(decoded.get("uid", "")), allowed_uid):
+            raise HTTPException(status_code=403, detail="This Google account is not authorized for this BOTROL instance.")
+        return str(decoded["uid"])
     _check_bearer(supplied, "BOTROL_ADMIN_TOKEN", "Admin")
+    return "legacy-admin"
 
 class DeviceRegistration(BaseModel):
     device_id: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9._-]+$")
