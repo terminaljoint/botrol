@@ -1,40 +1,73 @@
 # BOTROL Cloud API
 
-FastAPI relay for BOTROL ESP32 devices. The ESP32 polls this service over HTTPS and can execute a small allowlist of BLE HID keyboard actions on a paired computer.
+BOTROL is a cloud-coordinated IoT desktop-control prototype. The cloud interprets supported user intents, creates structured commands, queues them, and serves them to an authenticated ESP32 endpoint over HTTPS. The ESP32 performs only a narrow set of locally validated BLE-HID capabilities.
 
-## Routes
+## Architecture
 
-- `GET /health`: service health
-- `POST /api/v1/devices/register`: register ESP32 (device token)
-- `GET /api/v1/devices/{device_id}/commands/next`: fetch next command (device token)
-- `POST /api/v1/devices/{device_id}/commands/{command_id}/result`: report result (device token)
-- `POST /api/v1/admin/commands`: queue an allowlisted command (admin token)
+1. Windows voice panel submits a transcript to BOTROL Cloud using the admin credential.
+2. The cloud-side deterministic planner converts supported intents into structured actions.
+3. The cloud validates the action and queues a uniquely identified command with a two-minute expiry.
+4. ESP32 polls the cloud using its device credential, validates the received schema and local capability allowlist, then performs the hardware action.
+5. ESP32 reports the result to the cloud.
 
-## Command allowlist
+## Cloud routes
 
-- `ping`: connectivity test
-- `ble_open_notepad`: ask the ESP32 BLE keyboard to open Notepad using Windows + R
-- `ble_open_calculator`: ask the ESP32 BLE keyboard to open Calculator using Windows + R
+- `GET /health`
+- `POST /api/v1/devices/register`
+- `GET /api/v1/devices/{device_id}/commands/next`
+- `POST /api/v1/devices/{device_id}/commands/{command_id}/result`
+- Admin routes under `/api/v1/admin/*`
 
-The API rejects all other command identifiers. It does not accept arbitrary shell commands, scripts, URLs, or raw keystroke sequences.
+## Command model
 
-## Render environment variables
+The firmware does not contain task-specific command names such as `ble_open_notepad`. The cloud emits a generic capability command:
 
-- `BOTROL_DEVICE_TOKEN`: secret shared with ESP32 firmware.
-- `BOTROL_ADMIN_TOKEN`: secret used by the dashboard to enqueue commands.
-- `BOTROL_ALLOWED_ORIGINS`: `https://botrol-setup.vercel.app`
+```json
+{
+  "command": "hid_action",
+  "payload": {
+    "action": "launch_app",
+    "app": "notepad"
+  }
+}
+```
 
-Never commit real tokens or place them in public source code.
+The firmware accepts only the `launch_app` action and the locally approved application identifiers `notepad` and `calculator`. It rejects unknown commands, malformed payloads and unsupported applications. It does not execute arbitrary shell commands, scripts, URLs or raw keyboard sequences.
 
-## Deployment
+## Security controls in this prototype
 
-Render uses Root Directory `backend`, build command `pip install -r requirements.txt`, and start command `uvicorn main:app --host 0.0.0.0 --port $PORT`.
+- HTTPS certificate validation in ESP32 firmware using a trusted CA root (no insecure TLS bypass).
+- Separate admin and device bearer credentials, compared in constant time by the API.
+- Admin-only task submission and status routes.
+- Device-only registration, command polling and result reporting routes.
+- Strict command and payload allowlists on the cloud and device.
+- UUID command identifiers and one-time queued-to-delivered state transition.
+- Two-minute expiry for commands that remain queued.
+- Result reports are accepted only for commands in the delivered state.
+- No arbitrary command execution.
+
+## Deployment configuration
+
+Render service root directory: `backend`  
+Build command: `pip install -r requirements.txt`  
+Start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+
+Required Render environment variables:
+
+- `BOTROL_DEVICE_TOKEN`
+- `BOTROL_ADMIN_TOKEN`
+- `BOTROL_ALLOWED_ORIGINS=https://botrol-setup.vercel.app`
+
+Never commit real credentials. Provision the same device token into the ESP32 privately and store the admin token in Windows Credential Manager.
 
 ## Prototype limitations
 
-Device records and command queues are stored in memory and disappear when the service restarts or sleeps. This is a connectivity prototype. Before relying on BOTROL, add persistent storage, command expiry, replay protection, rate limits, audit logging, and stronger device authentication.
-
-BLE HID requires one-time pairing with the computer. This milestone's shortcut commands are Windows-specific. The browser sends requests to the cloud; the ESP32 performs the BLE keyboard action.
+- The current planner is deterministic rule-based intent matching, not an LLM or autonomous AI model.
+- Device and command state is held in process memory. Render restarts or instance sleep can clear queued commands and device registrations; persistent database storage is a future requirement.
+- The current prototype supports only ping, Notepad and Calculator launch actions.
+- ESP32 certificate trust must be checked against the live Render certificate chain during device deployment. If the hosting CA changes, update the embedded trusted root.
+- A global device token is used in this single-device prototype. A multi-device deployment should use unique per-device credentials and rotation/revocation.
+- BLE HID requires prior pairing with the target computer.
 
 ## Local run
 
@@ -44,4 +77,4 @@ Set `BOTROL_DEVICE_TOKEN` and `BOTROL_ADMIN_TOKEN`, then run:
 uvicorn main:app --reload
 ```
 
-Open `/docs` on the local server to inspect the API.
+Open `/docs` to inspect the API.
