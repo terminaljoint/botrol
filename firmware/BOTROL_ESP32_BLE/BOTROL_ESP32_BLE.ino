@@ -124,7 +124,7 @@ bool pairWithCode(const String& code) {
   preferences.putString("device_id", deviceId);
   preferences.end();
   cloudPaired = true;
-  emitStatus("cloud_registered", "ESP32 paired. Unique device credential saved securely in NVS.");
+  emitStatus("cloud_registered", "ESP32 paired. Unique device credential saved in ESP32 NVS.");
   return true;
 }
 
