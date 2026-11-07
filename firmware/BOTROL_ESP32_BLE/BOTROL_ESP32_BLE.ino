@@ -2,24 +2,28 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <Preferences.h>
 #include <HijelHID_BLEKeyboard.h>
 
-// BOTROL ESP32: generic BLE-HID hardware executor.
-// Task names, application choices, intent parsing and action planning belong in the cloud.
-// This firmware knows only generic HID events: key, text and bounded delay.
+// BOTROL ESP32: cloud-paired generic BLE-HID executor.
+// Pairing codes are short-lived and exchanged for a per-device credential.
+// The credential is stored in ESP32 NVS and never printed to USB serial.
 
-const char* WIFI_SSID = "YOUR_WIFI_NAME";
-const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 const char* BOTROL_SERVER = "https://botrol-cloud.onrender.com";
-const char* DEVICE_ID = "BOTROL-ESP32-001";
-const char* DEVICE_TOKEN = "YOUR_BOTROL_DEVICE_TOKEN";
-const char* FIRMWARE_VERSION = "0.4.0";
-
+const char* FIRMWARE_VERSION = "1.0.0";
 const unsigned long POLL_INTERVAL_MS = 5000;
 unsigned long lastPollAt = 0;
+
 WiFiClientSecure secureClient;
 HijelHID_BLEKeyboard keyboard("BOTROL");
+Preferences preferences;
+String wifiSsid;
+String wifiPassword;
+String deviceToken;
+String deviceId;
+String serialLine;
 bool commandInProgress = false;
+bool cloudPaired = false;
 
 static const char BOTROL_ROOT_CA[] PROGMEM = R"BOTROL_CA(
 -----BEGIN CERTIFICATE-----
@@ -45,14 +49,40 @@ vepuoxtGzi4CZ68zJpiq1UvSqTbFJjtbD4seiMHl
 -----END CERTIFICATE-----
 )BOTROL_CA";
 
+String makeDeviceId() {
+  String mac = WiFi.macAddress();
+  mac.replace(":", "");
+  mac.toUpperCase();
+  return "BOTROL-" + mac;
+}
+
+void emitStatus(const char* state, const char* detail = "") {
+  StaticJsonDocument<384> doc;
+  doc["type"] = "status";
+  doc["state"] = state;
+  doc["detail"] = detail;
+  doc["wifi"] = WiFi.status() == WL_CONNECTED ? "connected" : "disconnected";
+  doc["ssid"] = WiFi.status() == WL_CONNECTED ? WiFi.SSID() : "";
+  doc["cloud"] = cloudPaired ? "registered" : "not_registered";
+  serializeJson(doc, Serial);
+  Serial.println();
+}
+
 bool httpsRequest(const String& method, const String& path,
-                  const String& body, String& response) {
+                  const String& body, String& response,
+                  bool authenticated = true) {
   if (WiFi.status() != WL_CONNECTED) return false;
   HTTPClient http;
   secureClient.setCACert(BOTROL_ROOT_CA);
   if (!http.begin(secureClient, String(BOTROL_SERVER) + path)) return false;
-  http.setTimeout(10000);
-  http.addHeader("Authorization", String("Bearer ") + DEVICE_TOKEN);
+  http.setTimeout(15000);
+  if (authenticated) {
+    if (deviceToken.length() == 0) {
+      http.end();
+      return false;
+    }
+    http.addHeader("Authorization", String("Bearer ") + deviceToken);
+  }
   http.addHeader("Content-Type", "application/json");
   int status = method == "GET" ? http.GET() : http.POST(body);
   response = status > 0 ? http.getString() : "";
@@ -62,15 +92,39 @@ bool httpsRequest(const String& method, const String& path,
   return status >= 200 && status < 300;
 }
 
-bool registerDevice() {
-  StaticJsonDocument<192> doc;
-  doc["device_id"] = DEVICE_ID;
-  doc["firmware_version"] = FIRMWARE_VERSION;
+bool pairWithCode(const String& code) {
+  if (WiFi.status() != WL_CONNECTED) {
+    emitStatus("cloud_pair_failed", "Connect Wi-Fi before pairing.");
+    return false;
+  }
+  StaticJsonDocument<256> requestDoc;
+  requestDoc["pairing_code"] = code;
+  requestDoc["device_id"] = deviceId;
+  requestDoc["firmware_version"] = FIRMWARE_VERSION;
   String body, response;
-  serializeJson(doc, body);
-  bool ok = httpsRequest("POST", "/api/v1/devices/register", body, response);
-  Serial.println(ok ? "[BOTROL] Registered with cloud." : "[BOTROL] Registration failed.");
-  return ok;
+  serializeJson(requestDoc, body);
+  if (!httpsRequest("POST", "/api/v1/devices/pair", body, response, false)) {
+    emitStatus("cloud_pair_failed", "Cloud rejected pairing or could not be reached.");
+    return false;
+  }
+  StaticJsonDocument<768> responseDoc;
+  if (deserializeJson(responseDoc, response)) {
+    emitStatus("cloud_pair_failed", "Invalid pairing response from cloud.");
+    return false;
+  }
+  const char* issuedToken = responseDoc["device_token"] | "";
+  if (strlen(issuedToken) < 24) {
+    emitStatus("cloud_pair_failed", "Cloud response did not contain a valid device credential.");
+    return false;
+  }
+  deviceToken = String(issuedToken);
+  preferences.begin("botrol", false);
+  preferences.putString("device_token", deviceToken);
+  preferences.putString("device_id", deviceId);
+  preferences.end();
+  cloudPaired = true;
+  emitStatus("cloud_registered", "ESP32 paired. Unique device credential saved securely in NVS.");
+  return true;
 }
 
 void reportResult(const String& commandId, const char* status, const String& message) {
@@ -79,15 +133,14 @@ void reportResult(const String& commandId, const char* status, const String& mes
   doc["message"] = message;
   String body, response;
   serializeJson(doc, body);
-  String path = String("/api/v1/devices/") + DEVICE_ID +
+  String path = String("/api/v1/devices/") + deviceId +
                 "/commands/" + commandId + "/result";
   if (!httpsRequest("POST", path, body, response))
     Serial.println("[BOTROL] Could not report execution result.");
 }
 
-// USB/BLE HID usage IDs are generic keyboard usages, not task identifiers.
 bool validKeyUsage(int code) {
-  return (code >= 4 && code <=  39) || (code >= 40 && code <= 44) ||
+  return (code >= 4 && code <= 39) || (code >= 40 && code <= 44) ||
          (code >= 79 && code <= 82);
 }
 
@@ -100,7 +153,6 @@ bool executeHidSequence(JsonArray events, String& result) {
     result = "Invalid HID event sequence length.";
     return false;
   }
-
   for (JsonObject event : events) {
     const char* type = event["type"] | "";
     if (strcmp(type, "key") == 0) {
@@ -157,10 +209,7 @@ bool executeHidSequence(JsonArray events, String& result) {
 
 void processCommand(JsonObject command) {
   String commandId = command["command_id"] | "";
-  if (commandId.length() == 0 || commandId.length() > 64) {
-    Serial.println("[BOTROL] Rejected command with invalid ID.");
-    return;
-  }
+  if (commandId.length() == 0 || commandId.length() > 64) return;
   if (String(command["command"] | "") != "hid_sequence") {
     reportResult(commandId, "failed", "Unsupported protocol operation.");
     return;
@@ -176,9 +225,9 @@ void processCommand(JsonObject command) {
 }
 
 void pollCommands() {
-  if (commandInProgress || WiFi.status() != WL_CONNECTED) return;
+  if (commandInProgress || !cloudPaired || WiFi.status() != WL_CONNECTED) return;
   commandInProgress = true;
-  String path = String("/api/v1/devices/") + DEVICE_ID + "/commands/next";
+  String path = String("/api/v1/devices/") + deviceId + "/commands/next";
   String response;
   if (httpsRequest("GET", path, "", response)) {
     StaticJsonDocument<3072> doc;
@@ -191,8 +240,12 @@ void pollCommands() {
 }
 
 void connectWiFi() {
+  if (wifiSsid.length() == 0) {
+    emitStatus("setup_required", "Connect over USB and configure Wi-Fi from the BOTROL setup page.");
+    return;
+  }
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  WiFi.begin(wifiSsid.c_str(), wifiPassword.c_str());
   unsigned long started = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - started < 25000) {
     delay(500);
@@ -202,27 +255,96 @@ void connectWiFi() {
   if (WiFi.status() == WL_CONNECTED) {
     Serial.print("[WiFi] Connected: ");
     Serial.println(WiFi.localIP());
-  } else Serial.println("[WiFi] Connection timed out.");
+    emitStatus("wifi_connected", "Wi-Fi connection established.");
+  } else {
+    emitStatus("wifi_failed", "Could not connect. Check the Wi-Fi name and password.");
+  }
+}
+
+void handleSerialCommand(const String& line) {
+  StaticJsonDocument<768> doc;
+  if (deserializeJson(doc, line)) {
+    emitStatus("error", "Invalid USB serial JSON.");
+    return;
+  }
+  const char* type = doc["type"] | "";
+  if (strcmp(type, "get_status") == 0) {
+    emitStatus("device_status");
+  } else if (strcmp(type, "wifi_config") == 0) {
+    const char* ssid = doc["ssid"] | "";
+    const char* password = doc["password"] | "";
+    if (strlen(ssid) == 0 || strlen(ssid) > 32 || strlen(password) > 63) {
+      emitStatus("error", "Invalid Wi-Fi credentials.");
+      return;
+    }
+    wifiSsid = String(ssid);
+    wifiPassword = String(password);
+    preferences.begin("botrol", false);
+    preferences.putString("wifi_ssid", wifiSsid);
+    preferences.putString("wifi_password", wifiPassword);
+    preferences.end();
+    emitStatus("credentials_received", "Wi-Fi settings saved to ESP32 NVS.");
+    WiFi.disconnect(true);
+    delay(300);
+    connectWiFi();
+  } else if (strcmp(type, "pair") == 0) {
+    const char* code = doc["pairing_code"] | "";
+    if (strlen(code) < 6 || strlen(code) > 12) {
+      emitStatus("cloud_pair_failed", "Invalid pairing code.");
+      return;
+    }
+    pairWithCode(String(code));
+  } else {
+    emitStatus("error", "Unknown USB serial command.");
+  }
+}
+
+void pollSerial() {
+  while (Serial.available()) {
+    char ch = (char)Serial.read();
+    if (ch == '\n') {
+      String line = serialLine;
+      serialLine = "";
+      line.trim();
+      if (line.length()) handleSerialCommand(line);
+    } else if (ch != '\r') {
+      if (serialLine.length() < 1024) serialLine += ch;
+      else serialLine = "";
+    }
+  }
 }
 
 void setup() {
   Serial.begin(115200);
   delay(1000);
-  Serial.println("\n[BOTROL] Generic ESP32 cloud HID executor v0.4.0");
+  preferences.begin("botrol", true);
+  wifiSsid = preferences.getString("wifi_ssid", "");
+  wifiPassword = preferences.getString("wifi_password", "");
+  deviceToken = preferences.getString("device_token", "");
+  preferences.end();
+
+  WiFi.mode(WIFI_STA);
+  deviceId = makeDeviceId();
+  cloudPaired = deviceToken.length() > 0;
   keyboard.begin();
-  Serial.println("[BLE] Pair the device named BOTROL with Windows.");
-  connectWiFi();
-  if (WiFi.status() == WL_CONNECTED) registerDevice();
+
+  Serial.println("\n[BOTROL] Secure multi-user device firmware v1.0.0");
+  Serial.print("[BOTROL] Device ID: ");
+  Serial.println(deviceId);
+  Serial.println("[BLE] Pair the device named BOTROL with your computer.");
+  if (wifiSsid.length()) connectWiFi();
+  else emitStatus("setup_required", "Connect over USB and configure Wi-Fi from the BOTROL setup page.");
+  if (cloudPaired) emitStatus("cloud_registered", "Stored device credential loaded.");
 }
 
 void loop() {
-  if (WiFi.status() != WL_CONNECTED) {
+  pollSerial();
+  if (WiFi.status() != WL_CONNECTED && wifiSsid.length() && millis() % 30000 < 25) {
     connectWiFi();
-    if (WiFi.status() == WL_CONNECTED) registerDevice();
   }
   if (millis() - lastPollAt >= POLL_INTERVAL_MS) {
     lastPollAt = millis();
     pollCommands();
   }
-  delay(20);
+  delay(10);
 }
