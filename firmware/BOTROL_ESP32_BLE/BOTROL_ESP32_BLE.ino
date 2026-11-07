@@ -262,6 +262,26 @@ void connectWiFi() {
   }
 }
 
+void scanWiFiNetworks() {
+  WiFi.mode(WIFI_STA);
+  emitStatus("wifi_scanning", "Scanning nearby Wi-Fi networks.");
+  int count = WiFi.scanNetworks(false, true);
+  DynamicJsonDocument doc(4096);
+  doc["type"] = "wifi_scan_results";
+  JsonArray networks = doc.createNestedArray("networks");
+  if (count > 0) {
+    for (int i = 0; i < count && networks.size() < 30; i++) {
+      JsonObject network = networks.createNestedObject();
+      network["ssid"] = WiFi.SSID(i);
+      network["rssi"] = WiFi.RSSI(i);
+      network["secure"] = WiFi.encryptionType(i) != WIFI_AUTH_OPEN;
+    }
+  }
+  serializeJson(doc, Serial);
+  Serial.println();
+  WiFi.scanDelete();
+}
+
 void handleSerialCommand(const String& line) {
   StaticJsonDocument<768> doc;
   if (deserializeJson(doc, line)) {
@@ -271,6 +291,8 @@ void handleSerialCommand(const String& line) {
   const char* type = doc["type"] | "";
   if (strcmp(type, "get_status") == 0) {
     emitStatus("device_status");
+  } else if (strcmp(type, "wifi_scan") == 0) {
+    scanWiFiNetworks();
   } else if (strcmp(type, "wifi_config") == 0) {
     const char* ssid = doc["ssid"] | "";
     const char* password = doc["password"] | "";
