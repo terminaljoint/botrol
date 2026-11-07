@@ -2,212 +2,164 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#090d18"><title>BOTROL · Device Provisioning</title>
+<meta name="theme-color" content="#090d18"><title>BOTROL · Secure Device Setup</title>
 <style>
 :root{color-scheme:dark;--bg:#090d18;--panel:#111a2a;--line:#293750;--text:#edf3ff;--muted:#a0aec2;--accent:#aab6ff;--good:#65e0b2;--bad:#ff8585}
-*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 15% 0%,#29366b66,transparent 42%),var(--bg);color:var(--text);font:15px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif}.wrap{width:min(620px,calc(100% - 32px));margin:auto;padding:34px 0 50px}header{font-weight:850;letter-spacing:.16em;margin-bottom:38px}.panel{background:linear-gradient(155deg,#141e30f5,#0d1422f5);border:1px solid var(--line);border-radius:20px;padding:24px;box-shadow:0 22px 70px #0004;margin:16px 0}h1{font-size:clamp(34px,7vw,48px);line-height:1.05;letter-spacing:-.05em;margin:8px 0 12px}h1 span{color:var(--accent)}h2{font-size:18px;margin:0 0 8px}.muted{color:var(--muted);font-size:13px}.field{display:block;margin:17px 0 7px;font-weight:650;font-size:13px}input{width:100%;background:#080f1d;border:1px solid var(--line);border-radius:11px;padding:13px;color:var(--text);font:inherit}button{border:1px solid #7183d8;background:#8797f4;color:#091020;border-radius:11px;padding:12px 17px;font:inherit;font-weight:750;cursor:pointer}button.secondary{background:transparent;color:var(--text);border-color:var(--line)}button:disabled{opacity:.55;cursor:wait}.row{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}.status{margin-top:16px;padding:14px;border:1px solid var(--line);border-radius:12px;color:var(--muted);font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}.status.good{border-color:#65e0b277;color:var(--good)}.status.bad{border-color:#ff858577;color:var(--bad)}.network{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);font-size:13px}.network button{padding:7px 10px;font-size:12px}.notice{margin-top:15px;padding:13px;border-radius:11px;background:#ffd27a12;border:1px solid #ffd27a55;color:#e8d5a8;font-size:12px}a{color:var(--accent)}code{color:var(--accent)}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 15% 0%,#29366b66,transparent 42%),var(--bg);color:var(--text);font:15px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif}.wrap{width:min(650px,calc(100% - 32px));margin:auto;padding:34px 0 50px}header{font-weight:850;letter-spacing:.16em;margin-bottom:38px}.panel{background:linear-gradient(155deg,#141e30f5,#0d1422f5);border:1px solid var(--line);border-radius:20px;padding:24px;box-shadow:0 22px 70px #0004;margin:16px 0}h1{font-size:clamp(34px,7vw,48px);line-height:1.05;letter-spacing:-.05em;margin:8px 0 12px}h1 span{color:var(--accent)}h2{font-size:18px;margin:0 0 8px}.muted{color:var(--muted);font-size:13px}.field{display:block;margin:17px 0 7px;font-weight:650;font-size:13px}input{width:100%;background:#080f1d;border:1px solid var(--line);border-radius:11px;padding:13px;color:var(--text);font:inherit}button{border:1px solid #7183d8;background:#8797f4;color:#091020;border-radius:11px;padding:12px 17px;font:inherit;font-weight:750;cursor:pointer}button.secondary{background:transparent;color:var(--text);border-color:var(--line)}button:disabled{opacity:.55;cursor:not-allowed}.row{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}.status{margin-top:16px;padding:14px;border:1px solid var(--line);border-radius:12px;color:var(--muted);font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}.status.good{border-color:#65e0b277;color:var(--good)}.status.bad{border-color:#ff858577;color:var(--bad)}.notice{margin-top:15px;padding:13px;border-radius:11px;background:#ffd27a12;border:1px solid #ffd27a55;color:#e8d5a8;font-size:12px}a{color:var(--accent)}code{color:var(--accent)}
 </style>
 </head>
 <body><main class="wrap">
 <header>BOTROL / TERMINAL JOINT</header>
 <h1>Connect your <span>device.</span></h1>
-<p class="muted">View the ESP32's current Wi-Fi connection and change networks whenever needed. Configuration travels directly over USB; Wi-Fi credentials stay on the ESP32.</p>
+<p class="muted">Sign in, connect the ESP32 by USB, configure Wi-Fi, and pair it automatically. BOTROL Cloud issues a unique credential for this device. You never need to copy or type a permanent device token.</p>
+
 <section class="panel">
-<h2>1 · Connect ESP32 over USB</h2>
-<p class="muted">Connect the ESP32 to this computer with a USB data cable. Click below and select its serial port, usually shown as Silicon Labs CP210x or USB Serial Device.</p>
-<div class="row"><button id="connect">Choose ESP32 port</button><button class="secondary" id="disconnect" disabled>Disconnect</button></div>
-<div class="status" id="connection">Not connected · Chrome or Edge required</div>
-<h2 style="margin-top:18px">Live USB serial log</h2>
-<p class="muted">Raw messages received from the ESP32 appear here, including non-JSON diagnostics. Wi-Fi passwords and device tokens are never written to this log.</p>
-<div class="row"><button class="secondary" id="clearLog" type="button">Clear log</button></div>
-<pre class="status" id="serialLog" aria-live="polite" style="min-height:110px;max-height:260px;overflow:auto;font:12px/1.5 ui-monospace,Consolas,monospace">Waiting for serial data...</pre>
+<h2>1 · Your BOTROL account</h2>
+<p class="muted">Sign in with Google. Your devices will be private to this account.</p>
+<div class="row"><button id="googleSignIn">Continue with Google</button><button class="secondary" id="signOut" hidden>Sign out</button></div>
+<div class="status" id="authStatus">Checking Firebase configuration...</div>
 </section>
+
 <section class="panel">
-<h2>2 · Wi-Fi connection</h2>
-<p class="muted">Connect the ESP32 over USB, then check its current network. To switch networks, enter the new Wi-Fi details below and save. BOTROL keeps the old credentials if the new connection fails.</p>
-<div class="row"><button class="secondary" id="refreshWifi" disabled>Refresh Wi-Fi status</button><button class="secondary" id="scanWifi" disabled>Scan nearby networks</button></div><div class="status" id="networkList">No scan results yet.</div>
-<div class="status" id="wifiCurrent">Current Wi-Fi: waiting for ESP32 status...</div>
+<h2>2 · Connect ESP32 over USB</h2>
+<p class="muted">Use a USB data cable and a recent Chrome or Edge browser. Select the ESP32 serial port, usually Silicon Labs CP210x or USB Serial Device.</p>
+<div class="row"><button id="connect" disabled>Choose ESP32 port</button><button class="secondary" id="disconnect" disabled>Disconnect</button></div>
+<div class="status" id="connection">Sign in, then connect the ESP32.</div>
+<div class="status" id="deviceStatus">Waiting for ESP32 status...</div>
+</section>
+
+<section class="panel">
+<h2>3 · Configure Wi-Fi</h2>
+<p class="muted">Wi-Fi credentials are sent directly over USB and stored in ESP32 NVS. Use a 2.4 GHz Wi-Fi network.</p>
 <label class="field" for="ssid">Wi-Fi network name (SSID)</label><input id="ssid" maxlength="32" autocomplete="off" placeholder="Your Wi-Fi name">
 <label class="field" for="password">Wi-Fi password</label><input id="password" maxlength="63" type="password" autocomplete="new-password" placeholder="Password">
-<div class="row"><button id="send" disabled>Save and connect to this Wi-Fi</button></div>
-<div class="status" id="deviceStatus">Waiting for ESP32 USB connection</div>
-<div class="notice">Wi-Fi credentials are sent directly over USB and saved in ESP32 NVS only after a successful connection.</div>
+<div class="row"><button id="saveWifi" disabled>Save and connect</button></div>
+<div class="status" id="wifiStatus">Connect the ESP32 first.</div>
 </section>
+
 <section class="panel">
-<h2>3 · Connect to BOTROL Cloud</h2>
-<p class="muted">Enter the value configured as <code>BOTROL_DEVICE_TOKEN</code> in your BOTROL Cloud service environment. Use the device token, never the admin token.</p>
-<label class="field" for="deviceToken">BOTROL device token</label><input id="deviceToken" type="password" autocomplete="off" placeholder="Device token from cloud configuration">
-<div class="row"><button id="saveToken" disabled>Save token and register device</button></div>
-<div class="status" id="cloudStatus">Waiting for Wi-Fi and device token</div>
-<div class="notice">The token is sent directly over USB and stored in ESP32 NVS. Do not share it in chats, source code, or screenshots.</div>
+<h2>4 · Pair this ESP32 with your account</h2>
+<p class="muted">BOTROL creates a one-time pairing code, sends it directly over USB, and exchanges it for a unique device credential. The credential is saved in ESP32 NVS and is never shown in this page.</p>
+<label class="field" for="deviceLabel">Device name</label><input id="deviceLabel" maxlength="60" value="My BOTROL ESP32">
+<div class="row"><button id="pair" disabled>Pair device automatically</button></div>
+<div class="status" id="pairStatus">Sign in and connect the ESP32 to Wi-Fi before pairing.</div>
+<div class="notice">Pairing codes expire after five minutes and can only be used once. If a device is already paired, revoke it from its owner account before pairing it again.</div>
 </section>
 <p class="muted"><a href="./dashboard.html">Open BOTROL Command Center</a></p>
 </main>
-<script>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+
+const firebaseConfig={
+  apiKey:"AIzaSyBx5mA5s90dbacja5lUf_M8WqtOgfoJmbA",
+  authDomain:"botrol-cloud.firebaseapp.com",
+  projectId:"botrol-cloud",
+  storageBucket:"botrol-cloud.firebasestorage.app",
+  messagingSenderId:"298367613679",
+  appId:"1:298367613679:web:d56421dc5fcf20354e391a",
+  measurementId:"G-XCTZ7SW9WP"
+};
+const API="https://botrol-cloud.onrender.com";
 const $=id=>document.getElementById(id);
-let port=null,reader=null,writer=null,readTask=null,connected=false,rxBuffer="";
-let scannedNetworks=[];
-function show(el,message,kind=""){el.textContent=message;el.className="status"+(kind?" "+kind:"")}
-function logSerial(direction,line){
-  const log=$("serialLog");
-  if(log.textContent==="Waiting for serial data...")log.textContent="";
-  const stamp=new Date().toLocaleTimeString();
-  const entries=(log.textContent+"["+stamp+"] "+direction+": "+line+"\n").split("\n").filter(Boolean);
-  log.textContent=entries.slice(-100).join("\n");
-  log.scrollTop=log.scrollHeight;
+let auth=null,user=null,port=null,reader=null,writer=null,connected=false,rxBuffer="",wifiConnected=false,cloudPaired=false;
+
+function show(id,message,kind=""){const el=$(id);el.textContent=message;el.className="status"+(kind?" "+kind:"");}
+function updateButtons(){
+  $("connect").disabled=!user||connected;
+  $("saveWifi").disabled=!user||!connected;
+  $("pair").disabled=!user||!connected||!wifiConnected||cloudPaired;
+}
+async function api(path,options={}){
+  if(!user)throw new Error("Sign in with Google first.");
+  const token=await user.getIdToken();
+  const response=await fetch(API+path,{...options,headers:{...(options.headers||{}),Authorization:"Bearer "+token,"Content-Type":"application/json"}});
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok)throw new Error(data.detail||("BOTROL Cloud HTTP "+response.status));
+  return data;
 }
 function parseLine(line){
-  const trimmed=line.trim();
-  if(!trimmed)return;
-  logSerial("ESP32",trimmed);
+  const trimmed=line.trim();if(!trimmed)return;
   if(!trimmed.startsWith("{"))return;
   try{
     const data=JSON.parse(trimmed);
-    if(data.type==="wifi_network"){
-      const network={ssid:String(data.ssid||""),rssi:Number(data.rssi),channel:Number(data.channel),encryption:Number(data.encryption)};
-      if(network.ssid){
-        scannedNetworks.push(network);
-        renderNetworks();
-      }
-      return;
-    }
-    if(data.type==="wifi_scan_complete"){
-      if(scannedNetworks.length){
-        renderNetworks();
-      }else{
-        show($("networkList"),"No networks found. Check that the router broadcasts 2.4 GHz Wi-Fi, then scan again.","bad");
-      }
-      return;
-    }
-    if(data.type==="status"){
-      const state=typeof data.state==="string"?data.state:"unknown_state";
-      const diagnostics=data.wifi_status_code!==undefined?"Wi-Fi code: "+data.wifi_status_code+(data.wifi_disconnect_reason!==undefined?" · disconnect reason: "+data.wifi_disconnect_reason:""):"";
-      const detail=[state,data.detail,diagnostics,data.wifi==="connected"?"Wi-Fi: "+(data.ssid||"connected"):"Wi-Fi: disconnected",data.cloud==="registered"?"Cloud: registered":"Cloud: not registered"].filter(Boolean).join("\n");
-      if(state==="device_status"||state.startsWith("wifi_")||state==="setup_required"||state==="wifi_reconnecting"||state==="connecting"||state==="credentials_received"||state==="restoring"){
-        show($("wifiCurrent"),data.wifi==="connected"?"Connected to: "+(data.ssid||"Unknown network")+"\nStatus: Connected":"Not connected to Wi-Fi"+(data.detail?"\n"+data.detail:""),data.wifi==="connected"?"good":"");
-      }
-      if(state.startsWith("cloud_")||state==="command_completed")show($("cloudStatus"),detail,state==="cloud_registered"?"good":state==="cloud_registration_failed"?"bad":"");
-      const kind=["wifi_connected","usb_ready","setup_required"].includes(state)?"good":["error","wifi_failed"].includes(state)?"bad":"";
-      show($("deviceStatus"),detail,kind);
-    }
-  }catch(error){logSerial("PARSER","Invalid JSON received: "+error.message)}
+    if(data.type!=="status")return;
+    wifiConnected=data.wifi==="connected";
+    cloudPaired=data.cloud==="registered";
+    const detail=[data.state,data.detail,data.wifi==="connected"?"Wi-Fi: "+(data.ssid||"connected"):"Wi-Fi: disconnected",cloudPaired?"Cloud: paired":"Cloud: not paired",data.device_id?"Device ID: "+data.device_id:""].filter(Boolean).join("\n");
+    show("deviceStatus",detail,cloudPaired?"good":data.state==="error"||data.state==="wifi_failed"?"bad":"");
+    if(data.state==="wifi_connected")show("wifiStatus","Connected to "+(data.ssid||"your Wi-Fi")+".","good");
+    if(data.state==="wifi_failed")show("wifiStatus",data.detail||"Wi-Fi connection failed.","bad");
+    if(data.state==="cloud_registered")show("pairStatus",data.detail||"Device paired successfully.","good");
+    if(data.state==="cloud_pair_failed")show("pairStatus",data.detail||"Pairing failed. Generate a new code and retry.","bad");
+    updateButtons();
+  }catch(e){show("deviceStatus","Could not parse ESP32 status: "+e.message,"bad");}
 }
 async function readLoop(){
   try{
     while(connected&&reader){
-      const {value,done}=await reader.read();
-      if(done)break;
-      rxBuffer+=value;
-      let newline;
-      while((newline=rxBuffer.indexOf("\n"))>=0){
-        parseLine(rxBuffer.slice(0,newline));
-        rxBuffer=rxBuffer.slice(newline+1);
-      }
-      if(rxBuffer.length>2048){logSerial("PARSER","Discarded oversized serial line ("+rxBuffer.length+" characters)");rxBuffer="";}
+      const {value,done}=await reader.read();if(done)break;
+      rxBuffer+=value;let index;
+      while((index=rxBuffer.indexOf("\n"))>=0){parseLine(rxBuffer.slice(0,index));rxBuffer=rxBuffer.slice(index+1);}
+      if(rxBuffer.length>2048)rxBuffer="";
     }
-  }catch(error){
-    if(connected)show($("connection"),"USB read error: "+error.message,"bad");
-  }
+  }catch(e){if(connected)show("connection","USB read error: "+e.message,"bad");}
+}
+async function sendSerial(payload){
+  if(!connected||!writer)throw new Error("Connect the ESP32 over USB first.");
+  await writer.write(new TextEncoder().encode(JSON.stringify(payload)+"\n"));
 }
 async function connect(){
-  if(!("serial" in navigator)){show($("connection"),"Web Serial is unavailable. Use a recent Chrome or Edge browser on HTTPS or localhost.","bad");return}
+  if(!("serial" in navigator)){show("connection","Web Serial is unavailable. Use Chrome or Edge over HTTPS.","bad");return;}
   $("connect").disabled=true;
   try{
-    port=await navigator.serial.requestPort();
-    await port.open({baudRate:115200});
+    port=await navigator.serial.requestPort();await port.open({baudRate:115200});
     connected=true;
-    const decoder=new TextDecoderStream();
-    port.readable.pipeTo(decoder.writable).catch(()=>{});
-    reader=decoder.readable.getReader();
-    writer=port.writable.getWriter();
+    const decoder=new TextDecoderStream();port.readable.pipeTo(decoder.writable).catch(()=>{});
+    reader=decoder.readable.getReader();writer=port.writable.getWriter();
     $("disconnect").disabled=false;
-    $("send").disabled=false; $("saveToken").disabled=false; $("refreshWifi").disabled=false; $("scanWifi").disabled=false;
-    $("serialLog").textContent="";
-    logSerial("BROWSER","USB serial connected at 115200 baud");
-    show($("connection"),"USB serial connected at 115200 baud. Waiting for BOTROL...","good");
-    show($("deviceStatus"),"Listening for ESP32 status...");
-    readTask=readLoop();
-    await requestWifiStatus();
-  }catch(error){
-    connected=false;port=null;reader=null;writer=null;
-    show($("connection"),error.name==="NotFoundError"?"No serial port selected.":error.message||String(error),"bad");
-    $("connect").disabled=false;
-  }
+    show("connection","USB serial connected. Reading ESP32 status...","good");
+    readLoop();await sendSerial({type:"get_status"});updateButtons();
+  }catch(e){connected=false;port=null;show("connection",e.message||String(e),"bad");updateButtons();}
 }
 async function disconnect(){
-  connected=false;
-  $("send").disabled=true;$("saveToken").disabled=true;$("refreshWifi").disabled=true;$("scanWifi").disabled=true;$("disconnect").disabled=true;$("connect").disabled=false;
-  try{if(reader){await reader.cancel();reader.releaseLock()}}catch{}
-  try{if(writer){writer.releaseLock()}}catch{}
-  try{if(port)await port.close()}catch{}
-  reader=null;writer=null;port=null;
-  show($("connection"),"USB serial disconnected");
-  show($("deviceStatus"),"Connect the ESP32 to continue");
+  connected=false;wifiConnected=false;cloudPaired=false;
+  try{if(reader){await reader.cancel();reader.releaseLock();}}catch{}
+  try{if(writer)writer.releaseLock();}catch{}
+  try{if(port)await port.close();}catch{}
+  reader=null;writer=null;port=null;$("disconnect").disabled=true;
+  show("connection","USB serial disconnected.");updateButtons();
 }
-async function requestWifiStatus(){
-  if(!connected||!writer)return;
-  try{await writer.write(new TextEncoder().encode(JSON.stringify({type:"get_status"})+"\n"));logSerial("BROWSER","Sent get_status request");}
-  catch(error){show($("wifiCurrent"),"Could not request Wi-Fi status: "+error.message,"bad");}
-}
-async function scanWifi(){
-  if(!connected||!writer)return;
-  scannedNetworks=[];
-  show($("networkList"),"Scanning nearby networks...");
-  try{
-    await writer.write(new TextEncoder().encode(JSON.stringify({type:"wifi_scan"})+"\n"));
-    logSerial("BROWSER","Sent wifi_scan request");
-  }catch(error){show($("networkList"),"Could not start scan: "+error.message,"bad");}
-}
-function renderNetworks(){
-  const host=$("networkList");
-  host.textContent="";
-  const summary=document.createElement("div");summary.className="muted";summary.textContent="Found "+scannedNetworks.length+" network(s). Select one to fill its name.";host.append(summary);
-  if(!scannedNetworks.length)return;
-  scannedNetworks.sort((a,b)=>b.rssi-a.rssi);
-  for(const network of scannedNetworks){
-    const row=document.createElement("div");row.className="network";
-    const label=document.createElement("span");
-    label.textContent=network.ssid+" · "+network.rssi+" dBm · Ch "+network.channel+" · "+(network.encryption===0?"Open":"Secured");
-    const choose=document.createElement("button");choose.type="button";choose.textContent="Select";
-    choose.addEventListener("click",()=>{$("ssid").value=network.ssid;$("password").focus();});
-    row.append(label,choose);host.append(row);
-  }
-}
-async function sendConfig(){
+$("googleSignIn").onclick=async()=>{
+  try{await signInWithPopup(auth,new GoogleAuthProvider());}
+  catch(e){show("authStatus","Google sign-in failed: "+e.message,"bad");}
+};
+$("signOut").onclick=async()=>{await signOut(auth);};
+onAuthStateChanged(auth,async current=>{
+  user=current;
+  $("googleSignIn").hidden=!!user;$("signOut").hidden=!user;
+  show("authStatus",user?"Signed in as "+(user.displayName||user.email)+" · "+user.uid:"Not signed in. Continue with Google.",user?"good":"");
+  updateButtons();
+});
+$("connect").onclick=connect;$("disconnect").onclick=disconnect;
+$("saveWifi").onclick=async()=>{
   const ssid=$("ssid").value.trim(),password=$("password").value;
-  if(!connected||!writer){show($("deviceStatus"),"Connect the ESP32 first.","bad");return}
-  if(!ssid){show($("deviceStatus"),"Enter a Wi-Fi network name.","bad");return}
-  if(ssid.length>32||password.length>63){show($("deviceStatus"),"SSID must be at most 32 characters and password at most 63.","bad");return}
-  $("send").disabled=true;
+  if(!ssid||ssid.length>32||password.length>63){show("wifiStatus","Enter a valid SSID and password (maximum 32 and 63 characters).","bad");return;}
+  $("saveWifi").disabled=true;
+  try{await sendSerial({type:"wifi_config",ssid,password});$("password").value="";show("wifiStatus","Wi-Fi settings sent. Waiting for ESP32 connection...");}
+  catch(e){show("wifiStatus",e.message,"bad");}
+  finally{updateButtons();}
+};
+$("pair").onclick=async()=>{
+  $("pair").disabled=true;show("pairStatus","Creating a one-time pairing session...");
   try{
-    const command=JSON.stringify({type:"wifi_config",ssid,password})+"\n";
-    await writer.write(new TextEncoder().encode(command));
-    logSerial("BROWSER","Sent wifi_config (SSID length "+ssid.length+", password length "+password.length+"; values hidden)");
-    $("password").value="";
-    show($("deviceStatus"),"Configuration sent over USB. Waiting for Wi-Fi connection result...");
-  }catch(error){show($("deviceStatus"),"Could not send configuration: "+error.message,"bad")}
-  finally{$("send").disabled=!connected}
-}
-async function saveToken(){
- const token=$("deviceToken").value.trim();
- if(!connected||!writer){show($("cloudStatus"),"Connect the ESP32 USB port first.","bad");return}
- if(token.length<16||token.length>256){show($("cloudStatus"),"Device token length is invalid.","bad");return}
- $("saveToken").disabled=true;
- try{
-  const command=JSON.stringify({type:"cloud_config",device_token:token})+"\n";
-  await writer.write(new TextEncoder().encode(command));
-  logSerial("BROWSER","Sent cloud_config (token hidden)");
-  $("deviceToken").value="";
-  show($("cloudStatus"),"Token sent over USB. Waiting for cloud registration...");
- }catch(error){show($("cloudStatus"),"Could not send token: "+error.message,"bad")}
- finally{$("saveToken").disabled=!connected}
-}
-$("clearLog").addEventListener("click",()=>{$("serialLog").textContent="Log cleared.";});
-$("connect").addEventListener("click",connect);
-$("disconnect").addEventListener("click",disconnect);
-$("refreshWifi").addEventListener("click",requestWifiStatus);
-$("scanWifi").addEventListener("click",scanWifi);
-$("send").addEventListener("click",sendConfig);
-$("saveToken").addEventListener("click",saveToken);
-if("serial" in navigator)navigator.serial.addEventListener("disconnect",()=>{disconnect()});
-</script></body></html>
+    const session=await api("/api/v1/pairing-sessions",{method:"POST",body:JSON.stringify({label:$("deviceLabel").value.trim()||"BOTROL ESP32"})});
+    await sendSerial({type:"pair",pairing_code:session.pairing_code});
+    show("pairStatus","One-time code sent directly to ESP32. Expires in five minutes. Waiting for cloud confirmation...");
+  }catch(e){show("pairStatus","Could not pair: "+e.message,"bad");}
+  finally{updateButtons();}
+};
+if(!("serial" in navigator))show("connection","Web Serial is unavailable. Use a recent Chrome or Edge browser over HTTPS.","bad");
+</script>
+</body></html>
