@@ -44,7 +44,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-const firebaseConfig={apiKey:"YOUR_FIREBASE_WEB_API_KEY",authDomain:"YOUR_FIREBASE_PROJECT_ID.firebaseapp.com",projectId:"YOUR_FIREBASE_PROJECT_ID",appId:"YOUR_FIREBASE_WEB_APP_ID"};
+const firebaseConfig={apiKey:"AIzaSyBx5mA5s90dbacja5lUf_M8WqtOgfoJmbA",authDomain:"botrol-cloud.firebaseapp.com",projectId:"botrol-cloud",storageBucket:"botrol-cloud.firebasestorage.app",messagingSenderId:"298367613679",appId:"1:298367613679:web:d56421dc5fcf20354e391a",measurementId:"G-XCTZ7SW9WP"};
 const API="https://botrol-cloud.onrender.com",DEVICE="BOTROL-ESP32-001",$=id=>document.getElementById(id);
 let auth=null,currentUser=null;
 function show(el,msg,kind=""){el.textContent=msg;el.className="status"+(kind?" "+kind:"");}
