@@ -1,6 +1,6 @@
 # BOTROL
 
-**BOTROL** is an ESP32-powered, cloud-coordinated desktop automation system developed under **Terminal Joint**.
+**BOTROL** is an ESP32-powered, cloud-coordinated desktop automation system developed by **Murugan Santhosh**.
 
 The project connects a physical ESP32 device to the BOTROL cloud service. The cloud side coordinates device communication and commands, while the ESP32 acts as the hardware endpoint. The system is designed around a hybrid communication model: WebSocket for live communication and HTTPS polling as a fallback.
 
